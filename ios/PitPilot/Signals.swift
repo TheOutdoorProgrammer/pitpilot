@@ -115,6 +115,192 @@ struct SignalHistoryPoint: Codable, Identifiable {
     var id: String { calendarDate ?? bucketStart ?? "unknown" }
 }
 
+enum SignalChartKind: Equatable {
+    case trend, state, category, bars
+
+    static func resolve(unit: String, statistic: String) -> Self {
+        if statistic == "count" { return .bars }
+        if unit == "boolean" { return .state }
+        if unit == "code" { return .category }
+        if unit == "count" || statistic == "sum" { return .bars }
+        return .trend
+    }
+}
+
+// A day number is a chart coordinate, not an observation timestamp or a guessed timezone.
+enum SignalCalendarDay {
+    private static var calendar: Calendar {
+        var value = Calendar(identifier: .gregorian)
+        value.timeZone = TimeZone(secondsFromGMT: 0)!
+        return value
+    }
+    static func number(_ string: String) -> Double? {
+        let parts = string.split(separator: "-").compactMap { Int($0) }
+        guard parts.count == 3,
+              let date = calendar.date(from: DateComponents(year: parts[0], month: parts[1], day: parts[2])),
+              calendar.component(.year, from: date) == parts[0],
+              calendar.component(.month, from: date) == parts[1],
+              calendar.component(.day, from: date) == parts[2] else { return nil }
+        return floor(date.timeIntervalSince1970 / 86400)
+    }
+    static func label(_ number: Double) -> String {
+        let formatter = DateFormatter()
+        formatter.calendar = calendar
+        formatter.timeZone = calendar.timeZone
+        formatter.setLocalizedDateFormatFromTemplate("MMMd")
+        return formatter.string(from: Date(timeIntervalSince1970: number.rounded() * 86400))
+    }
+}
+
+struct SignalChartBucket: Identifiable {
+    let point: SignalHistoryPoint
+    let start: Double
+    let end: Double
+    let calendar: Bool
+    var id: String { point.id }
+    var center: Double { (start + end) / 2 }
+    var state: String {
+        guard point.count > 0, [0, 1].contains(point.minimum), [0, 1].contains(point.maximum), point.minimum <= point.maximum else { return "Unknown" }
+        if point.minimum != point.maximum { return "Mixed" }
+        return point.minimum == 1 ? "On" : "Off"
+    }
+    var category: String {
+        guard point.count > 0, point.minimum.isFinite, point.maximum.isFinite,
+              point.minimum.rounded() == point.minimum, point.maximum.rounded() == point.maximum else { return "Unknown" }
+        return point.minimum == point.maximum ? "Code \(point.minimum.formatted(.number.precision(.fractionLength(0))))" : "Mixed"
+    }
+}
+
+struct SignalChartVertex: Identifiable {
+    let id: String
+    let x: Double
+    let value: Double
+    let segment: String
+}
+
+struct SignalStateMark: Identifiable {
+    let id: String
+    let start: Double
+    let end: Double
+    let label: String
+    let summary: Bool
+}
+
+struct SignalChartData {
+    let buckets: [SignalChartBucket]
+    let vertices: [SignalChartVertex]
+    let calendar: Bool
+    let kind: SignalChartKind
+    let statistic: String
+
+    init(series: SignalHistorySeries, unit: String, calendar: Bool, maximumJoinGapSeconds: Int = 900) {
+        self.calendar = calendar
+        statistic = series.statistic
+        kind = .resolve(unit: unit, statistic: series.statistic)
+        buckets = series.points.compactMap { point in
+            if calendar {
+                guard let day = point.calendarDate.flatMap(SignalCalendarDay.number) else { return nil }
+                return SignalChartBucket(point: point, start: day, end: day, calendar: true)
+            }
+            guard point.calendarDate == nil,
+                  let first = (point.windowStart ?? point.firstObservedAt).flatMap(SignalFormat.date),
+                  let last = (point.windowEnd ?? point.lastObservedAt).flatMap(SignalFormat.date) else { return nil }
+            return SignalChartBucket(point: point, start: first.timeIntervalSince1970, end: last.timeIntervalSince1970, calendar: false)
+        }.sorted { $0.start < $1.start }
+        var result: [SignalChartVertex] = []
+        var segment = 0
+        var previous: SignalChartBucket?
+        var lastX: Double?
+        for bucket in buckets {
+            guard kind == .trend else { continue }
+            var values: [(Double, Double)] = []
+            if calendar || series.statistic != "sample" {
+                values = [(bucket.center, bucket.point.mean)]
+            } else {
+                if let first = bucket.point.firstObservedAt.flatMap(SignalFormat.date) {
+                    values.append((first.timeIntervalSince1970, bucket.point.first))
+                }
+                if bucket.point.lastObservedAt != bucket.point.firstObservedAt,
+                   let last = bucket.point.lastObservedAt.flatMap(SignalFormat.date) {
+                    values.append((last.timeIntervalSince1970, bucket.point.last))
+                }
+            }
+            let missingBucket: Bool
+            if let previous {
+                if calendar { missingBucket = bucket.start - previous.end > 1 }
+                else if series.statistic == "sample",
+                        let end = previous.point.bucketEnd.flatMap(SignalFormat.date),
+                        let start = bucket.point.bucketStart.flatMap(SignalFormat.date) {
+                    missingBucket = start.timeIntervalSince(end) > 0.001
+                } else { missingBucket = bucket.start > previous.end }
+            } else { missingBucket = false }
+            if missingBucket { segment += 1 }
+            for (index, value) in values.enumerated() {
+                // This is a conservative drawing limit, not a claim about source sampling cadence.
+                if !calendar, series.statistic == "sample", let lastX, value.0 - lastX > Double(maximumJoinGapSeconds) { segment += 1 }
+                result.append(SignalChartVertex(id: "\(bucket.id)/\(index)", x: value.0, value: value.1, segment: "\(series.id)/\(segment)"))
+                lastX = value.0
+            }
+            previous = bucket
+        }
+        vertices = result
+    }
+
+    var stateMarks: [SignalStateMark] {
+        buckets.flatMap { bucket -> [SignalStateMark] in
+            let label = kind == .state ? bucket.state : bucket.category
+            if calendar || statistic != "sample" {
+                return [SignalStateMark(id: bucket.id, start: bucket.center, end: bucket.center, label: label, summary: true)]
+            }
+            if bucket.end - bucket.start <= 900 {
+                return [SignalStateMark(id: bucket.id, start: bucket.start, end: bucket.end, label: label, summary: false)]
+            }
+            var marks: [SignalStateMark] = []
+            for (name, timestamp, value) in [("first", bucket.point.firstObservedAt, bucket.point.first), ("last", bucket.point.lastObservedAt, bucket.point.last)] {
+                if let date = timestamp.flatMap(SignalFormat.date) {
+                    let x = date.timeIntervalSince1970
+                    marks.append(SignalStateMark(id: "\(bucket.id)/\(name)", start: x, end: x,
+                        label: SignalFormat.value(value, unit: kind == .state ? "boolean" : "code"), summary: false))
+                }
+            }
+            if marks.isEmpty || label == "Mixed" || label == "Unknown" {
+                marks.append(SignalStateMark(id: bucket.id, start: bucket.center, end: bucket.center, label: label, summary: true))
+            }
+            return marks
+        }
+    }
+
+    var xDomain: ClosedRange<Double> {
+        let first = buckets.first?.start ?? 0
+        let last = buckets.map(\.end).max() ?? first
+        let padding = calendar ? 0.5 : max((last - first) * 0.025, 1)
+        return (first - padding)...(last + padding)
+    }
+    func yDomain(unit: String) -> ClosedRange<Double> {
+        let minimum = buckets.map { $0.point.minimum }.min() ?? 0
+        let maximum = buckets.map { $0.point.maximum }.max() ?? 1
+        if unit == "%", minimum >= 0, maximum <= 100 { return 0...100 }
+        let padding = max((maximum - minimum) * 0.12, max(abs(maximum) * 0.05, 1))
+        if kind == .bars { return (minimum >= 0 ? 0 : minimum - padding)...max(1, maximum + padding) }
+        return (minimum - padding)...(maximum + padding)
+    }
+    var axisValues: [Double] {
+        let low = buckets.first?.start ?? 0
+        let high = buckets.map(\.end).max() ?? low
+        if high <= low { return [low] }
+        return Array(Set((0...3).map { index in
+            let value = low + (high - low) * Double(index) / 3
+            return calendar ? value.rounded() : value
+        })).sorted()
+    }
+    func xLabel(_ value: Double) -> String {
+        if calendar { return SignalCalendarDay.label(value) }
+        let date = Date(timeIntervalSince1970: value)
+        if xDomain.upperBound - xDomain.lowerBound < 86400 { return date.formatted(date: .omitted, time: .shortened) }
+        return date.formatted(.dateTime.month(.abbreviated).day())
+    }
+}
+
 struct SourcedSignalContext: Codable, Identifiable {
     let source: String
     let context: SignalContext
@@ -147,9 +333,20 @@ struct SignalCoverage: Codable {
 }
 struct SignalDiagnostic: Codable {
     let `class`: String
-    let codes: [String]
+    let codes: [String]?
     let successfulReads: Int
     let unknown: Bool
+    private enum CodingKeys: String, CodingKey { case `class`, codes, successfulReads, unknown }
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        self.class = try values.decode(String.self, forKey: .class)
+        successfulReads = try values.decode(Int.self, forKey: .successfulReads)
+        unknown = try values.decode(Bool.self, forKey: .unknown)
+        codes = try values.decodeIfPresent([String].self, forKey: .codes)
+        if !unknown, codes == nil {
+            throw DecodingError.dataCorruptedError(forKey: .codes, in: values, debugDescription: "Known diagnostics require an explicit codes array")
+        }
+    }
 }
 struct SignalSegment: Codable {
     let startedAt: String
@@ -183,6 +380,7 @@ enum SignalFormat {
     }
     static func value(_ number: Double, unit: String) -> String {
         if unit == "boolean" { return number == 0 ? "Off" : number == 1 ? "On" : "Unknown" }
+        if unit == "code" { return number.rounded() == number ? "Code \(number.formatted(.number.precision(.fractionLength(0))))" : "Unknown code" }
         let label: String
         switch unit {
         case "percent": label = "%"

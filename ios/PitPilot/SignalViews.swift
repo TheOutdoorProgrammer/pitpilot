@@ -20,7 +20,7 @@ struct VehicleSignalsView: View {
                     .disabled(store.signalsRefreshing.contains(vehicleID))
             }
             if let latest, !latest.metrics.isEmpty {
-                Text("Tap a metric to explore its history. Daily summaries describe a period, not the vehicle right now.")
+                Text("Tap a reading to explore its history.")
                     .font(.subheadline).foregroundStyle(.secondary)
                 TimelineView(.periodic(from: .now, by: 60)) { context in
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 280), alignment: .top)], alignment: .leading, spacing: 14) {
@@ -112,7 +112,6 @@ struct SignalHistoryView: View {
     @State private var error: String?
     @State private var saved = false
     @State private var requestID: UUID?
-    @State private var selectedDate: Date?
 
     init(vehicleID: String, metric: String, latest: LatestSignals) {
         self.vehicleID = vehicleID
@@ -130,10 +129,19 @@ struct SignalHistoryView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                Text("THE READING, IN CONTEXT").font(.caption.weight(.bold)).tracking(2).foregroundStyle(PitStyle.amber)
-                Picker("Reading type", selection: $statistic) {
-                    ForEach(statistics, id: \.self) { Text(SignalFormat.statistic($0)).tag($0) }
-                }.pickerStyle(.menu).accessibilityIdentifier("signalStatistic")
+                if let reading = latest.readings(metric).first(where: { $0.statistic == statistic }) {
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text(SignalFormat.value(reading.latest.value, unit: reading.unit))
+                            .font(.system(size: 38, weight: .bold, design: .rounded)).monospacedDigit()
+                        Text("Last reported · \(reading.latest.calendarDate ?? reading.latest.timeLabel)")
+                            .font(.subheadline).foregroundStyle(.secondary)
+                    }.accessibilityElement(children: .combine)
+                }
+                if statistics.count > 1 {
+                    Picker("Reading type", selection: $statistic) {
+                        ForEach(statistics, id: \.self) { Text(SignalFormat.statistic($0)).tag($0) }
+                    }.pickerStyle(.menu).accessibilityIdentifier("signalStatistic")
+                }
                 Picker("History range", selection: $days) {
                     Text("7 days").tag(7)
                     Text("30 days").tag(30)
@@ -146,28 +154,30 @@ struct SignalHistoryView: View {
                 }
                 if loading { ProgressView("Loading history…").frame(maxWidth: .infinity) }
                 if let history, !history.series.allSatisfy({ $0.points.isEmpty }) {
-                    if history.series.contains(where: { $0.points.contains(where: { $0.calendarDate == nil }) }) {
-                        SignalHistoryChart(history: history, selectedDate: $selectedDate)
-                    }
                     ForEach(history.series) { series in
-                        let dated = series.points.filter { $0.calendarDate != nil }
-                        if !dated.isEmpty {
-                            Text("Calendar-date snapshots").font(.headline)
-                            Text("Each point represents a calendar day. Time and timezone unknown; no intraday timing is implied.")
-                                .font(.footnote).foregroundStyle(.secondary)
-                            Text(series.label).font(.subheadline)
-                            CalendarSignalChart(points: dated, unit: history.unit)
+                        ForEach([false, true], id: \.self) { calendar in
+                            let data = SignalChartData(series: series, unit: history.unit, calendar: calendar)
+                            if !data.buckets.isEmpty {
+                                SignalSeriesChart(data: data, series: series, unit: history.unit)
+                            }
                         }
                     }
-                    Text(statistic == "sample"
-                         ? "Dots are timestamped readings. Shaded ranges preserve minimum and maximum values within each bucket. Gaps are not connected."
-                         : "Each mark covers a supplied reporting period. These summaries do not reveal the time of individual measurements.")
-                        .font(.footnote).foregroundStyle(.secondary)
-                    Text("Displayed interval: \(SignalFormat.interval(history.from, history.to))")
-                        .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                    if let selectedDate {
-                        selectedValues(history, at: selectedDate)
-                    }
+                    DisclosureGroup("About these readings") {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text("Requested range: \(SignalFormat.interval(history.from, history.to))")
+                            Text("Charts fit the available readings. Blank gaps are not zero.")
+                            if history.series.contains(where: { $0.points.contains(where: { $0.calendarDate != nil }) }) {
+                                Text("Calendar-date snapshots have day precision only. Time and timezone are unknown. Lines join adjacent reported days; missing days break the trend.")
+                            }
+                            if history.unit == "boolean" || history.unit == "code" {
+                                Text("Lanes show observed states. Mixed means different states were recorded within a bucket; transition times and state durations are unavailable. Sample bands stop at 15 minutes; longer windows show recorded endpoints. No average is treated as a state.")
+                            } else if statistic == "sample" {
+                                Text("Lines connect recorded endpoints up to 15 minutes apart, breaking at empty buckets. They show a trend, not continuous coverage. Shading preserves each bucket's minimum and maximum; gaps inside a reduced bucket may be unavailable.")
+                            } else {
+                                Text("Each value describes its reporting period. When several summaries share a bucket, the chart shows their average and range, not a combined total or an exact measurement time.")
+                            }
+                        }.font(.footnote).foregroundStyle(.secondary).padding(.top, 8)
+                    }.accessibilityIdentifier("signalProvenance")
                     DisclosureGroup("Read chart values") {
                         LazyVStack(alignment: .leading, spacing: 14) {
                             ForEach(history.series) { series in
@@ -189,20 +199,6 @@ struct SignalHistoryView: View {
             .refreshable { await load() }
     }
 
-    @ViewBuilder private func selectedValues(_ history: SignalHistory, at date: Date) -> some View {
-        ForEach(history.series) { series in
-            ForEach(series.points.filter { point in
-                guard let start = point.bucketStart.flatMap(SignalFormat.date), let end = point.bucketEnd.flatMap(SignalFormat.date) else { return false }
-                return date >= start && date <= end
-            }) { point in
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(series.label).font(.headline)
-                    SignalBucketDetails(point: point, unit: history.unit, statistic: series.statistic)
-                }.padding().background(PitStyle.panel, in: RoundedRectangle(cornerRadius: 14))
-            }
-        }
-    }
-
     @MainActor private func load() async {
         let id = UUID()
         requestID = id
@@ -210,7 +206,6 @@ struct SignalHistoryView: View {
         let requestedDays = days
         history = store.cachedSignalHistory(vehicleID: vehicleID, metric: metric, statistic: requestedStatistic, days: requestedDays)
         saved = history != nil
-        selectedDate = nil
         error = nil
         loading = true
         defer { if requestID == id { loading = false } }
@@ -226,71 +221,149 @@ struct SignalHistoryView: View {
     }
 }
 
-private struct CalendarSignalChart: View {
-    let points: [SignalHistoryPoint]
+private struct SignalSeriesChart: View {
+    let data: SignalChartData
+    let series: SignalHistorySeries
     let unit: String
+    @State private var selection: Double?
+    private var tint: Color { series.quality == "estimated" ? .cyan : PitStyle.amber }
+    private var yDomain: ClosedRange<Double> { data.yDomain(unit: unit) }
+    private var identifier: String {
+        if data.kind == .state { return "signalStateChart" }
+        if data.kind == .category { return "signalCodeChart" }
+        if data.kind == .bars { return "signalBarChart" }
+        return data.calendar ? "calendarSignalChart" : "signalHistoryChart"
+    }
+    private var caption: String {
+        if data.kind == .state || data.kind == .category {
+            let kind = series.statistic == "sample" ? "Observed states" : SignalFormat.statistic(series.statistic)
+            return "\(kind) · Mixed = multiple states"
+        }
+        if data.kind == .bars {
+            return data.buckets.contains { $0.point.count > 1 } ? "Average per bucket · whiskers show range" : SignalFormat.statistic(series.statistic)
+        }
+        if data.calendar {
+            let kind = series.statistic == "snapshot" ? "Daily snapshots" : "Daily \(SignalFormat.statistic(series.statistic).lowercased())"
+            return "\(kind) · gaps show missing days"
+        }
+        if series.statistic == "sample" { return "Recorded trend · shaded range" }
+        let statistic = SignalFormat.statistic(series.statistic)
+        return data.buckets.contains { $0.point.count > 1 } ? "\(statistic) · bucket averages and range" : "\(statistic) · reported periods"
+    }
     var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(series.label).font(.subheadline.weight(.semibold))
+                Spacer()
+                if data.kind == .trend || data.kind == .bars { Text(unit == "count" ? "Count" : unit).font(.caption).foregroundStyle(.secondary) }
+            }
+            if data.kind == .state || data.kind == .category { stateChart }
+            else { numericChart }
+            Text(caption).font(.caption).foregroundStyle(.secondary)
+            if let first = data.buckets.first, let last = data.buckets.last {
+                Text("\(data.xLabel(first.start)) to \(data.xLabel(last.end))\(data.calendar ? " · Day precision" : "")")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            if let selection, let bucket = data.buckets.min(by: { abs($0.center - selection) < abs($1.center - selection) }) {
+                SignalBucketDetails(point: bucket.point, unit: unit, statistic: series.statistic)
+                    .padding(12).frame(maxWidth: .infinity, alignment: .leading)
+                    .background(PitStyle.background, in: RoundedRectangle(cornerRadius: 12))
+            }
+        }.padding(16).background(PitStyle.panel, in: RoundedRectangle(cornerRadius: 20))
+    }
+
+    private var numericChart: some View {
         Chart {
-            ForEach(points.sorted { ($0.calendarDate ?? "") < ($1.calendarDate ?? "") }) { point in
-                if let date = point.calendarDate {
-                    RuleMark(x: .value("Calendar date", date), yStart: .value("Minimum", point.minimum), yEnd: .value("Maximum", point.maximum))
-                        .foregroundStyle(PitStyle.amber.opacity(0.5)).lineStyle(StrokeStyle(lineWidth: 4))
-                        .accessibilityLabel("\(date), timezone unknown")
-                        .accessibilityValue("Minimum \(SignalFormat.value(point.minimum, unit: unit)), maximum \(SignalFormat.value(point.maximum, unit: unit))")
-                    PointMark(x: .value("Calendar date", date), y: .value("Snapshot average", point.mean))
-                        .foregroundStyle(PitStyle.amber).symbolSize(65)
-                        .accessibilityLabel("\(date), \(point.count == 1 ? "snapshot" : "snapshot average"), timezone unknown")
-                        .accessibilityValue(SignalFormat.value(point.mean, unit: unit))
+            if data.kind == .trend {
+                ForEach(data.vertices) { vertex in
+                    AreaMark(x: .value("Position", vertex.x), yStart: .value("Baseline", yDomain.lowerBound), yEnd: .value("Value", vertex.value), series: .value("Segment", vertex.segment))
+                        .foregroundStyle(LinearGradient(colors: [tint.opacity(0.24), tint.opacity(0.015)], startPoint: .top, endPoint: .bottom))
+                        .interpolationMethod(.linear).accessibilityHidden(true)
+                    LineMark(x: .value("Position", vertex.x), y: .value("Value", vertex.value), series: .value("Segment", vertex.segment))
+                        .foregroundStyle(tint).lineStyle(StrokeStyle(lineWidth: 2.5)).interpolationMethod(.linear)
+                        .accessibilityHidden(true)
+                    PointMark(x: .value("Position", vertex.x), y: .value("Value", vertex.value))
+                        .foregroundStyle(tint).symbolSize(data.vertices.count > 30 ? 9 : 30)
+                        .accessibilityLabel(data.xLabel(vertex.x)).accessibilityValue(SignalFormat.value(vertex.value, unit: unit))
                 }
             }
-        }.chartYAxisLabel(unit).frame(height: 240).accessibilityIdentifier("calendarSignalChart")
-    }
-}
-
-private struct SignalHistoryChart: View {
-    let history: SignalHistory
-    @Binding var selectedDate: Date?
-    private var timeRange: ClosedRange<Date> {
-        let start = SignalFormat.date(history.from) ?? Date()
-        let end = SignalFormat.date(history.to) ?? start.addingTimeInterval(1)
-        return min(start, end)...max(start, end)
-    }
-    var body: some View {
-        Chart {
-            ForEach(history.series) { series in
-                ForEach(series.points) { point in
-                    if point.calendarDate == nil, let start = point.windowStart.flatMap(SignalFormat.date), let end = point.windowEnd.flatMap(SignalFormat.date) {
-                        RectangleMark(xStart: .value("Period start", start), xEnd: .value("Period end", end),
-                                      yStart: .value("Minimum", point.minimum), yEnd: .value("Maximum", point.maximum))
-                            .foregroundStyle(by: .value("Source and quality", series.label)).opacity(0.25)
-                            .accessibilityLabel("\(series.label), \(SignalFormat.interval(point.windowStart, point.windowEnd))")
-                            .accessibilityValue("Minimum \(point.minimum.formatted()), maximum \(point.maximum.formatted()) \(history.unit)")
-                        if series.statistic != "sample" {
-                            RuleMark(xStart: .value("Period start", start), xEnd: .value("Period end", end), y: .value("Bucket average", point.mean))
-                                .foregroundStyle(by: .value("Source and quality", series.label))
-                                .accessibilityLabel("Period bucket average").accessibilityValue(SignalFormat.value(point.mean, unit: history.unit))
-                        }
+            ForEach(data.buckets) { bucket in
+                if data.kind == .bars {
+                    BarMark(x: .value("Position", bucket.center), y: .value("Value", bucket.point.mean), width: .ratio(0.65))
+                        .foregroundStyle(tint.gradient)
+                        .accessibilityLabel("\(data.xLabel(bucket.center)), \(bucket.point.count > 1 ? "average" : "value")")
+                        .accessibilityValue(SignalFormat.value(bucket.point.mean, unit: unit))
+                    if bucket.point.mean == 0 {
+                        PointMark(x: .value("Position", bucket.center), y: .value("Value", 0))
+                            .foregroundStyle(tint).symbolSize(30)
+                            .accessibilityLabel("\(data.xLabel(bucket.center)), recorded zero")
+                            .accessibilityValue(SignalFormat.value(0, unit: unit))
                     }
-                    if series.statistic == "sample", let first = point.firstObservedAt.flatMap(SignalFormat.date) {
-                        PointMark(x: .value("First observed", first), y: .value("First reading", point.first))
-                            .foregroundStyle(by: .value("Source and quality", series.label))
-                            .accessibilityLabel("\(series.label), \(first.formatted())").accessibilityValue(SignalFormat.value(point.first, unit: history.unit))
-                        if point.lastObservedAt != point.firstObservedAt, let last = point.lastObservedAt.flatMap(SignalFormat.date) {
-                            PointMark(x: .value("Last observed", last), y: .value("Last reading", point.last))
-                                .foregroundStyle(by: .value("Source and quality", series.label))
-                                .accessibilityLabel("\(series.label), \(last.formatted())").accessibilityValue(SignalFormat.value(point.last, unit: history.unit))
-                        }
+                }
+                if bucket.point.minimum != bucket.point.maximum {
+                    if !data.calendar, data.kind == .trend, bucket.start != bucket.end {
+                        RectangleMark(xStart: .value("Period start", bucket.start), xEnd: .value("Period end", bucket.end), yStart: .value("Minimum", bucket.point.minimum), yEnd: .value("Maximum", bucket.point.maximum))
+                            .foregroundStyle(tint.opacity(0.14)).accessibilityHidden(true)
                     }
+                    RuleMark(x: .value("Position", bucket.center), yStart: .value("Minimum", bucket.point.minimum), yEnd: .value("Maximum", bucket.point.maximum))
+                        .foregroundStyle(tint.opacity(0.7)).lineStyle(StrokeStyle(lineWidth: 2))
+                        .accessibilityLabel("\(data.xLabel(bucket.center)), range")
+                        .accessibilityValue("\(SignalFormat.value(bucket.point.minimum, unit: unit)) to \(SignalFormat.value(bucket.point.maximum, unit: unit))")
                 }
             }
         }
-        .chartXSelection(value: $selectedDate)
-        .chartXScale(domain: timeRange, range: .plotDimension(padding: 8))
+        .chartXScale(domain: data.xDomain, range: .plotDimension(padding: 8))
+        .chartYScale(domain: yDomain, range: .plotDimension(padding: 6))
+        .chartXAxis { timeAxis }
+        .chartYAxis {
+            AxisMarks(position: .leading, values: .automatic(desiredCount: 4)) {
+                AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5)).foregroundStyle(.gray.opacity(0.25))
+                AxisValueLabel()
+            }
+        }
+        .chartXSelection(value: $selection)
         .chartPlotStyle { $0.clipped() }
-        .chartYAxisLabel(history.unit)
-        .chartLegend(position: .bottom, alignment: .leading)
-        .frame(height: 280)
-        .accessibilityIdentifier("signalHistoryChart")
+        .frame(height: 260).accessibilityIdentifier(identifier)
+    }
+
+    private var stateChart: some View {
+        Chart {
+            ForEach(data.stateMarks) { mark in
+                let state = mark.label
+                if mark.start != mark.end {
+                    RuleMark(xStart: .value("Start", mark.start), xEnd: .value("End", mark.end), y: .value("State", state))
+                        .foregroundStyle(state == "Mixed" || state == "Unknown" || state == "Off" ? .gray : tint)
+                        .lineStyle(StrokeStyle(lineWidth: 9, lineCap: .round, dash: state == "Mixed" ? [3, 3] : []))
+                        .accessibilityLabel("\(data.xLabel(mark.start)) to \(data.xLabel(mark.end)), \(state), observed within this bucket")
+                } else {
+                    PointMark(x: .value("Position", mark.start), y: .value("State", state))
+                        .foregroundStyle(state == "Mixed" || state == "Unknown" || state == "Off" ? .gray : tint).symbolSize(60)
+                        .accessibilityLabel("\(data.xLabel(mark.start)), \(mark.summary ? SignalFormat.statistic(series.statistic) + " bucket" : "observed"), \(state)")
+                }
+            }
+        }
+        .chartXScale(domain: data.xDomain, range: .plotDimension(padding: 8))
+        .chartYScale(domain: stateLanes)
+        .chartXAxis { timeAxis }
+        .chartYAxis {
+            AxisMarks(position: .leading) {
+                AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5)).foregroundStyle(.gray.opacity(0.25))
+                AxisValueLabel()
+            }
+        }
+        .chartXSelection(value: $selection)
+        .frame(height: max(160, CGFloat(stateLanes.count) * 46)).accessibilityIdentifier(identifier)
+    }
+    private var stateLanes: [String] {
+        if data.kind == .state { return ["Off", "On", "Mixed", "Unknown"].filter { lane in lane == "Off" || lane == "On" || data.stateMarks.contains { $0.label == lane } } }
+        return Array(Set(data.stateMarks.map(\.label))).sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+    }
+    @AxisContentBuilder private var timeAxis: some AxisContent {
+        AxisMarks(values: data.axisValues) { value in
+            AxisValueLabel {
+                if let number = value.as(Double.self) { Text(data.xLabel(number)).font(.caption2) }
+            }
+        }
     }
 }
 
@@ -302,9 +375,17 @@ private struct SignalBucketDetails: View {
         VStack(alignment: .leading, spacing: 5) {
             Text(point.calendarDate.map { "\($0) · Time and timezone unknown" } ?? SignalFormat.interval(point.windowStart, point.windowEnd))
                 .font(.caption).foregroundStyle(.secondary)
-            Text("Min \(SignalFormat.value(point.minimum, unit: unit)) · Max \(SignalFormat.value(point.maximum, unit: unit))")
-            Text("Bucket average \(SignalFormat.value(point.mean, unit: unit)) · \(point.count) \(statistic == "sample" ? "readings" : "summaries")")
-                .font(.caption).foregroundStyle(.secondary)
+            if unit == "boolean" || unit == "code" {
+                let bucket = SignalChartBucket(point: point, start: 0, end: 0, calendar: point.calendarDate != nil)
+                Text(unit == "boolean" ? bucket.state : bucket.category).font(.headline)
+                if point.minimum != point.maximum { Text("Multiple states recorded; transition times unavailable.").font(.caption).foregroundStyle(.secondary) }
+                Text("First \(SignalFormat.value(point.first, unit: unit)) · Last \(SignalFormat.value(point.last, unit: unit))").font(.caption)
+                Text("\(point.count) \(statistic == "sample" ? "readings" : "summaries")").font(.caption).foregroundStyle(.secondary)
+            } else {
+                Text("Min \(SignalFormat.value(point.minimum, unit: unit)) · Max \(SignalFormat.value(point.maximum, unit: unit))")
+                Text("\(point.count > 1 ? "Bucket average" : "Value") \(SignalFormat.value(point.mean, unit: unit)) · \(point.count) \(statistic == "sample" ? "readings" : "summaries")")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             if statistic == "sample", let date = point.firstObservedAt {
                 Text("First: \(SignalFormat.value(point.first, unit: unit)) at \(SignalFormat.date(date)?.formatted() ?? date)").font(.caption)
             }
@@ -327,8 +408,8 @@ private struct SignalContextsView: View {
                         if let diagnostic = item.context.diagnostic {
                             Text("\(diagnostic.class.capitalized) diagnostics").font(.subheadline.weight(.semibold))
                             if diagnostic.unknown { Text("Diagnostic result unknown").foregroundStyle(.orange) }
-                            else if diagnostic.codes.isEmpty { Text("No codes reported") }
-                            else { Text(diagnostic.codes.joined(separator: ", ")).textSelection(.enabled) }
+                            else if diagnostic.codes?.isEmpty != false { Text("No codes reported") }
+                            else { Text((diagnostic.codes ?? []).joined(separator: ", ")).textSelection(.enabled) }
                             Text("\(diagnostic.successfulReads) successful reads").font(.caption).foregroundStyle(.secondary)
                         }
                         if let coverage = item.context.coverage {

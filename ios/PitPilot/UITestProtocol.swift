@@ -108,18 +108,29 @@ final class UITestProtocol: URLProtocol {
     }
     override func stopLoading() {}
 
-    private static func signalTime(_ offset: TimeInterval) -> String { ISO8601DateFormatter().string(from: Date().addingTimeInterval(offset)) }
+    private static let signalNow = Date()
+    private static func signalTime(_ offset: TimeInterval) -> String { ISO8601DateFormatter().string(from: signalNow.addingTimeInterval(offset)) }
+    private static func signalDay(_ offset: Int) -> String { String(signalTime(Double(offset) * 86400).prefix(10)) }
     private static var signalLatest: [String: Any] {
         guard signals else { return ["asOf": signalTime(0), "definitions": [], "series": [], "contexts": []] }
         return ["asOf": signalTime(0), "definitions": [
             ["metric": "fuel_level_pct", "label": "Fuel level", "unit": "%", "staleAfterSeconds": 900],
             ["metric": "manifold_kpa", "label": "Manifold pressure", "unit": "kPa", "staleAfterSeconds": 900],
+            ["metric": "mil_on", "label": "Malfunction indicator", "unit": "boolean", "staleAfterSeconds": 900],
+            ["metric": "fuel_system_1_status", "label": "Fuel system status", "unit": "code", "staleAfterSeconds": 900],
+            ["metric": "retained_samples", "label": "Recorded samples", "unit": "count", "staleAfterSeconds": 900],
             ["metric": "rpm", "label": "Engine speed", "unit": "rpm", "staleAfterSeconds": 900]
         ], "series": [
             ["metric": "fuel_level_pct", "unit": "%", "source": "smartcar", "statistic": "snapshot", "quality": "measured", "stale": true,
-             "latest": ["key": "synthetic-fuel", "metric": "fuel_level_pct", "unit": "%", "statistic": "snapshot", "quality": "measured", "value": 55, "calendarDate": "2026-10-08", "timezone": "unknown"]],
+             "latest": ["key": "synthetic-fuel", "metric": "fuel_level_pct", "unit": "%", "statistic": "snapshot", "quality": "measured", "value": 0, "calendarDate": signalDay(-47), "timezone": "unknown"]],
+            ["metric": "mil_on", "unit": "boolean", "source": "pi", "statistic": "sample", "quality": "measured", "stale": true,
+             "latest": ["key": "synthetic-mil", "metric": "mil_on", "unit": "boolean", "statistic": "sample", "quality": "measured", "value": 1, "observedAt": signalTime(-3600)]],
+            ["metric": "fuel_system_1_status", "unit": "code", "source": "pi", "statistic": "sample", "quality": "measured", "stale": true,
+             "latest": ["key": "synthetic-status", "metric": "fuel_system_1_status", "unit": "code", "statistic": "sample", "quality": "measured", "value": 4, "observedAt": signalTime(-3600)]],
+            ["metric": "retained_samples", "unit": "count", "source": "pi", "statistic": "sum", "quality": "measured", "stale": true,
+             "latest": ["key": "synthetic-count", "metric": "retained_samples", "unit": "count", "statistic": "sum", "quality": "measured", "value": 130, "periodStart": signalTime(-172800), "periodEnd": signalTime(-86400)]],
             ["metric": "manifold_kpa", "unit": "kPa", "source": "pi", "statistic": "sample", "quality": "measured", "stale": true,
-             "latest": ["key": "synthetic-manifold", "metric": "manifold_kpa", "unit": "kPa", "statistic": "sample", "quality": "measured", "value": 42, "observedAt": signalTime(-3600)]],
+             "latest": ["key": "synthetic-manifold", "metric": "manifold_kpa", "unit": "kPa", "statistic": "sample", "quality": "measured", "value": 39, "observedAt": signalTime(-3400)]],
             ["metric": "manifold_kpa", "unit": "kPa", "source": "pi", "statistic": "max", "quality": "measured", "stale": true,
              "latest": ["key": "synthetic-manifold-max", "metric": "manifold_kpa", "unit": "kPa", "statistic": "max", "quality": "measured", "value": 84, "periodStart": signalTime(-172800), "periodEnd": signalTime(-86400)]]
         ], "contexts": []]
@@ -130,17 +141,47 @@ final class UITestProtocol: URLProtocol {
         func value(_ name: String) -> String { query.first { $0.name == name }?.value ?? "" }
         let metric = value("metric")
         let statistic = value("statistic")
-        var response: [String: Any] = ["metric": metric, "unit": metric == "fuel_level_pct" ? "%" : "kPa", "from": value("from"), "to": value("to"), "maxPoints": 120, "series": []]
+        let unit = ["fuel_level_pct": "%", "mil_on": "boolean", "fuel_system_1_status": "code", "retained_samples": "count"][metric] ?? "kPa"
+        var response: [String: Any] = ["metric": metric, "unit": unit, "from": value("from"), "to": value("to"), "maxPoints": 120, "series": []]
         if ProcessInfo.processInfo.arguments.contains("--ui-testing-history-empty") { return response }
-        let point: [String: Any]
+        var points: [[String: Any]] = []
         if metric == "fuel_level_pct" {
-            point = ["calendarDate": "2026-10-08", "timezone": "unknown", "minimum": 55, "maximum": 55, "mean": 55, "first": 55, "last": 55, "count": 1]
+            for index in 0..<94 where ![23, 24, 25, 61, 62].contains(index) {
+                let day = signalDay(-140 + index)
+                guard day >= String(value("from").prefix(10)), day <= String(value("to").prefix(10)) else { continue }
+                let fuel = index == 93 ? 0 : 94 - Double(index % 19) * 4.8
+                points.append(["calendarDate": day, "timezone": "unknown", "minimum": fuel, "maximum": fuel, "mean": fuel, "first": fuel, "last": fuel, "count": 1])
+            }
+        } else if metric == "retained_samples" {
+            for index in 0..<8 where index != 4 {
+                let amount = Double(40 + index * 10)
+                points.append(["bucketStart": signalTime(Double(-9 + index) * 86400), "bucketEnd": signalTime(Double(-8 + index) * 86400),
+                    "windowStart": signalTime(Double(-9 + index) * 86400), "windowEnd": signalTime(Double(-8 + index) * 86400),
+                    "minimum": index == 0 ? 0 : amount - 20, "maximum": index == 0 ? 0 : amount + 20, "mean": index == 0 ? 0 : amount,
+                    "first": index == 0 ? 0 : amount - 20, "last": index == 0 ? 0 : amount + 20, "count": 2])
+            }
+        } else if metric == "mil_on" || metric == "fuel_system_1_status" {
+            for index in 0..<8 where index != 4 {
+                let start = Double(-7200 + index * 450)
+                let low = metric == "mil_on" ? Double(index % 2) : Double(index % 2 == 0 ? 2 : 4)
+                let high = index == 2 ? (metric == "mil_on" ? 1.0 : 4.0) : low
+                points.append(["bucketStart": signalTime(start), "bucketEnd": signalTime(start + 450), "windowStart": signalTime(start + 30), "windowEnd": signalTime(start + 420),
+                    "minimum": low, "maximum": high, "mean": (low + high) / 2, "first": low, "last": high, "count": 8,
+                    "firstObservedAt": signalTime(start + 30), "lastObservedAt": signalTime(start + 420)])
+            }
         } else if statistic == "sample" {
-            point = ["bucketStart": signalTime(-7200), "bucketEnd": signalTime(-3600), "windowStart": signalTime(-5400), "windowEnd": signalTime(-3600), "minimum": 32, "maximum": 42, "mean": 37, "first": 32, "last": 42, "count": 2, "firstObservedAt": signalTime(-5400), "lastObservedAt": signalTime(-3600)]
+            for index in 0..<16 where index != 8 {
+                let start = Double(-7200 + index * 240)
+                let first = 34 + Double(index % 5) * 7
+                let last = first + 5
+                points.append(["bucketStart": signalTime(start), "bucketEnd": signalTime(start + 240), "windowStart": signalTime(start + 30), "windowEnd": signalTime(start + 200),
+                    "minimum": first - 3, "maximum": last + 3, "mean": (first + last) / 2, "first": first, "last": last, "count": 8,
+                    "firstObservedAt": signalTime(start + 30), "lastObservedAt": signalTime(start + 200)])
+            }
         } else {
-            point = ["bucketStart": signalTime(-172800), "bucketEnd": signalTime(-86400), "windowStart": signalTime(-172800), "windowEnd": signalTime(-86400), "minimum": 84, "maximum": 84, "mean": 84, "first": 84, "last": 84, "count": 1]
+            points = [["bucketStart": signalTime(-172800), "bucketEnd": signalTime(-86400), "windowStart": signalTime(-172800), "windowEnd": signalTime(-86400), "minimum": 78, "maximum": 84, "mean": 81, "first": 78, "last": 84, "count": 2]]
         }
-        response["series"] = [["source": metric == "fuel_level_pct" ? "smartcar" : "pi", "quality": "measured", "statistic": statistic, "points": [point]]]
+        response["series"] = [["source": metric == "fuel_level_pct" ? "smartcar" : "pi", "quality": "measured", "statistic": statistic, "points": points]]
         return response
     }
 }

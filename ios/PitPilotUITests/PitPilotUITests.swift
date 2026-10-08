@@ -178,7 +178,7 @@ final class PitPilotUITests: XCTestCase {
         capture("Signals overview with actual values", app)
         fuel.tap()
         XCTAssertTrue(app.descendants(matching: .any)["calendarSignalChart"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.staticTexts["Calendar-date snapshots"].exists)
+        XCTAssertTrue(app.staticTexts["Daily snapshots · gaps show missing days"].exists)
         XCTAssertFalse(app.descendants(matching: .any)["signalHistoryChart"].exists)
         capture("Fuel calendar-day chart", app)
         XCUIDevice.shared.orientation = .landscapeLeft
@@ -198,7 +198,7 @@ final class PitPilotUITests: XCTestCase {
         capture("Manifold timestamped history", app)
         app.buttons["signalStatistic"].tap()
         app.buttons["Period maximum"].tap()
-        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Each mark covers")).firstMatch.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Period maximum · bucket averages and range"].waitForExistence(timeout: 5))
         capture("Manifold aggregate history", app)
         app.terminate()
         app.launchArguments = ["--ui-testing", "--ui-testing-signals", "--ui-testing-preserve-cache", "--ui-testing-offline"]
@@ -235,6 +235,34 @@ final class PitPilotUITests: XCTestCase {
         }
     }
 
+    func testDiscreteStatesCodesAndCountHistory() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-testing", "--ui-testing-signals"]
+        app.launch()
+        connect(app)
+        app.staticTexts["Synthetic route truck"].tap()
+        for (metric, chart, title) in [
+            ("fuel_system_1_status", "signalCodeChart", "Categorical codes without fractional states"),
+            ("mil_on", "signalStateChart", "Boolean observed states and mixed bucket"),
+            ("retained_samples", "signalBarChart", "Count bars preserve average and range")
+        ] {
+            let button = app.buttons["signal-\(metric)"]
+            for _ in 0..<7 where !button.isHittable { app.swipeUp() }
+            XCTAssertTrue(button.waitForExistence(timeout: 5))
+            button.tap()
+            XCTAssertTrue(app.descendants(matching: .any)[chart].waitForExistence(timeout: 5))
+            XCTAssertFalse(app.descendants(matching: .any)["signalHistoryChart"].exists)
+            XCTAssertFalse(app.descendants(matching: .any)["calendarSignalChart"].exists)
+            if metric != "retained_samples" {
+                XCTAssertTrue(app.staticTexts["Observed states · Mixed = multiple states"].exists)
+            } else {
+                XCTAssertTrue(app.staticTexts["Average per bucket · whiskers show range"].exists)
+            }
+            capture(title, app)
+            app.navigationBars.buttons.element(boundBy: 0).tap()
+        }
+    }
+
     private func connect(_ app: XCUIApplication) {
         let button = app.buttons["connectButton"]
         XCTAssertFalse(button.isEnabled)
@@ -253,7 +281,7 @@ final class PitPilotUITests: XCTestCase {
         }
     }
     private func capture(_ name: String, _ app: XCUIApplication) {
-        let attachment = XCTAttachment(screenshot: app.screenshot())
+        let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         attachment.name = name
         attachment.lifetime = .keepAlways
         add(attachment)

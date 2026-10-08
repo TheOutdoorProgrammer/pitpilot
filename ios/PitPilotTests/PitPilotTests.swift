@@ -2,6 +2,115 @@ import XCTest
 @testable import PitPilot
 
 final class PitPilotTests: XCTestCase {
+    func testDenseCalendarTrendPreservesDaySpacingGapsZeroAndSparseAxis() throws {
+        let start = try XCTUnwrap(SignalFormat.date("2026-05-01T00:00:00Z"))
+        let points = (0..<94).filter { ![23, 24, 25, 61, 62].contains($0) }.map { index in
+            let day = String(ISO8601DateFormatter().string(from: start.addingTimeInterval(Double(index) * 86400)).prefix(10))
+            let fuel = index == 93 ? 0 : 95 - Double(index % 19) * 5
+            return SignalHistoryPoint(minimum: fuel, maximum: fuel, mean: fuel, first: fuel, last: fuel, count: 1, calendarDate: day, timezone: "unknown")
+        }
+        let series = SignalHistorySeries(source: "smartcar", quality: "measured", statistic: "snapshot", points: points)
+        let chart = SignalChartData(series: series, unit: "%", calendar: true)
+        XCTAssertEqual(chart.kind, .trend)
+        XCTAssertEqual(chart.vertices.count, 89)
+        XCTAssertEqual(chart.vertices.last?.value, 0)
+        XCTAssertEqual(Set(chart.vertices.map(\.segment)).count, 3)
+        XCTAssertEqual(chart.vertices[23].x - chart.vertices[22].x, 4)
+        XCTAssertNotEqual(chart.vertices[23].segment, chart.vertices[22].segment)
+        XCTAssertEqual(chart.axisValues.count, 4)
+        XCTAssertEqual(chart.yDomain(unit: "%"), 0...100)
+        XCTAssertEqual(chart.xDomain.upperBound - chart.xDomain.lowerBound, 94)
+        XCTAssertTrue(points.allSatisfy { $0.firstObservedAt == nil && $0.windowStart == nil })
+        XCTAssertNil(SignalCalendarDay.number("2026-02-30"))
+        let estimated = SignalHistorySeries(source: "pi", quality: "estimated", statistic: "snapshot", points: points)
+        let other = SignalChartData(series: estimated, unit: "%", calendar: true)
+        XCTAssertNotEqual(chart.vertices.first?.segment, other.vertices.first?.segment)
+    }
+
+    func testBooleanAndCodeBucketsNeverBecomeFractionalStates() {
+        let mixed = SignalHistoryPoint(minimum: 0, maximum: 1, mean: 0.375, first: 0, last: 1, count: 8, calendarDate: "2026-10-08")
+        let off = SignalHistoryPoint(minimum: 0, maximum: 0, mean: 0, first: 0, last: 0, count: 1, calendarDate: "2026-10-07")
+        let on = SignalHistoryPoint(minimum: 1, maximum: 1, mean: 1, first: 1, last: 1, count: 1, calendarDate: "2026-10-06")
+        let invalid = SignalHistoryPoint(minimum: 0.5, maximum: 0.5, mean: 0.5, first: 0.5, last: 0.5, count: 1, calendarDate: "2026-10-05")
+        let series = SignalHistorySeries(source: "pi", quality: "measured", statistic: "snapshot", points: [mixed, off, on, invalid])
+        let chart = SignalChartData(series: series, unit: "boolean", calendar: true)
+        XCTAssertEqual(chart.kind, .state)
+        XCTAssertTrue(chart.vertices.isEmpty)
+        XCTAssertEqual(chart.buckets.map(\.state), ["Unknown", "On", "Off", "Mixed"])
+        let codes = SignalHistoryPoint(minimum: 2, maximum: 4, mean: 3, first: 2, last: 4, count: 2, calendarDate: "2026-10-08")
+        let codeChart = SignalChartData(series: SignalHistorySeries(source: "pi", quality: "measured", statistic: "sample", points: [codes]), unit: "code", calendar: true)
+        XCTAssertEqual(codeChart.kind, .category)
+        XCTAssertTrue(codeChart.vertices.isEmpty)
+        XCTAssertEqual(codeChart.buckets.first?.category, "Mixed")
+        XCTAssertEqual(SignalChartKind.resolve(unit: "boolean", statistic: "count"), .bars)
+    }
+
+    func testCountBarsPreserveAveragePeriodValueWithoutInventingTotals() {
+        let point = SignalHistoryPoint(minimum: 10, maximum: 20, mean: 15, first: 10, last: 20, count: 2, calendarDate: "2026-10-08")
+        let series = SignalHistorySeries(source: "pi", quality: "measured", statistic: "sum", points: [point])
+        let chart = SignalChartData(series: series, unit: "count", calendar: true)
+        XCTAssertEqual(chart.kind, .bars)
+        XCTAssertEqual(chart.buckets.first?.point.mean, 15)
+        XCTAssertEqual(chart.buckets.first?.point.count, 2)
+        XCTAssertEqual(chart.buckets.first?.point.maximum, 20)
+        XCTAssertTrue(chart.vertices.isEmpty)
+        XCTAssertEqual(SignalChartKind.resolve(unit: "L", statistic: "sum"), .bars)
+        XCTAssertEqual(SignalChartKind.resolve(unit: "kPa", statistic: "max"), .trend)
+        let zero = SignalHistoryPoint(minimum: 0, maximum: 0, mean: 0, first: 0, last: 0, count: 1, calendarDate: "2026-10-07")
+        let zeroChart = SignalChartData(series: SignalHistorySeries(source: "pi", quality: "measured", statistic: "sum", points: [zero, point]), unit: "count", calendar: true)
+        XCTAssertEqual(zeroChart.yDomain(unit: "count").lowerBound, 0)
+    }
+
+    func testLongUniformBooleanWindowShowsEndpointsWithoutHeldState() {
+        let point = SignalHistoryPoint(bucketStart: "2026-10-08T10:00:00Z", bucketEnd: "2026-10-08T12:00:00Z",
+            windowStart: "2026-10-08T10:00:00Z", windowEnd: "2026-10-08T12:00:00Z",
+            minimum: 0, maximum: 0, mean: 0, first: 0, last: 0, count: 2,
+            firstObservedAt: "2026-10-08T10:00:00Z", lastObservedAt: "2026-10-08T12:00:00Z")
+        let series = SignalHistorySeries(source: "pi", quality: "measured", statistic: "sample", points: [point])
+        let chart = SignalChartData(series: series, unit: "boolean", calendar: false)
+        XCTAssertEqual(chart.stateMarks.count, 2)
+        XCTAssertTrue(chart.stateMarks.allSatisfy { $0.start == $0.end && $0.label == "Off" && !$0.summary })
+        XCTAssertEqual(chart.stateMarks[1].start - chart.stateMarks[0].start, 7200)
+        let summary = SignalChartData(series: SignalHistorySeries(source: "pi", quality: "measured", statistic: "max", points: [point]), unit: "boolean", calendar: false)
+        XCTAssertEqual(summary.stateMarks.count, 1)
+        XCTAssertTrue(summary.stateMarks[0].summary)
+        XCTAssertEqual(summary.stateMarks[0].start, summary.stateMarks[0].end)
+    }
+
+    func testTimestampTrendBreaksMissingBucketsAndLongUnknownGaps() throws {
+        func point(_ start: String, _ end: String, _ first: String, _ last: String) -> SignalHistoryPoint {
+            SignalHistoryPoint(bucketStart: start, bucketEnd: end, windowStart: first, windowEnd: last,
+                minimum: 30, maximum: 60, mean: 42, first: 35, last: 50, count: 8, firstObservedAt: first, lastObservedAt: last)
+        }
+        let points = [
+            point("2026-10-08T12:00:00Z", "2026-10-08T12:05:00Z", "2026-10-08T12:00:30Z", "2026-10-08T12:04:00Z"),
+            point("2026-10-08T12:05:00Z", "2026-10-08T12:10:00Z", "2026-10-08T12:05:30Z", "2026-10-08T12:09:00Z"),
+            point("2026-10-08T12:15:00Z", "2026-10-08T12:20:00Z", "2026-10-08T12:15:30Z", "2026-10-08T12:19:00Z"),
+            point("2026-10-08T12:20:00Z", "2026-10-08T13:00:00Z", "2026-10-08T12:20:30Z", "2026-10-08T12:59:00Z")
+        ]
+        let series = SignalHistorySeries(source: "pi", quality: "measured", statistic: "sample", points: points)
+        let chart = SignalChartData(series: series, unit: "kPa", calendar: false)
+        XCTAssertEqual(chart.vertices.count, 8)
+        XCTAssertEqual(chart.vertices[0].segment, chart.vertices[3].segment)
+        XCTAssertNotEqual(chart.vertices[3].segment, chart.vertices[4].segment)
+        XCTAssertNotEqual(chart.vertices[6].segment, chart.vertices[7].segment)
+        XCTAssertEqual(chart.vertices[0].x, try XCTUnwrap(SignalFormat.date(points[0].firstObservedAt!)).timeIntervalSince1970)
+        XCTAssertEqual(chart.buckets.first?.point.minimum, 30)
+        XCTAssertEqual(chart.buckets.first?.point.maximum, 60)
+    }
+
+    func testUnknownDiagnosticsAllowOmittedCodesWithoutClaimingNoFaults() throws {
+        for json in [#"{"class":"stored","successfulReads":0,"unknown":true}"#, #"{"class":"stored","codes":null,"successfulReads":0,"unknown":true}"#] {
+            let diagnostic = try JSONDecoder().decode(SignalDiagnostic.self, from: Data(json.utf8))
+            XCTAssertTrue(diagnostic.unknown)
+            XCTAssertNil(diagnostic.codes)
+        }
+        XCTAssertThrowsError(try JSONDecoder().decode(SignalDiagnostic.self, from: Data(#"{"class":"stored","codes":null,"successfulReads":1,"unknown":false}"#.utf8)))
+        let known = try JSONDecoder().decode(SignalDiagnostic.self, from: Data(#"{"class":"stored","codes":[],"successfulReads":1,"unknown":false}"#.utf8))
+        XCTAssertFalse(known.unknown)
+        XCTAssertEqual(known.codes, [])
+    }
+
     private var signalFixture: Data {
         Data(#"{"asOf":"2026-10-08T12:00:00Z","definitions":[{"metric":"fuel_level_pct","label":"Fuel level","unit":"%","staleAfterSeconds":900},{"metric":"rpm","label":"Engine speed","unit":"rpm","staleAfterSeconds":900}],"series":[{"metric":"fuel_level_pct","unit":"%","source":"smartcar","statistic":"snapshot","quality":"measured","stale":true,"latest":{"key":"synthetic","metric":"fuel_level_pct","unit":"%","statistic":"snapshot","quality":"measured","value":0,"calendarDate":"2026-10-08","timezone":"unknown"}}]}"#.utf8)
     }
