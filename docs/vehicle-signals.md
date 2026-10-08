@@ -40,6 +40,14 @@ History defaults to seven days and 120 points per source and quality series. Exp
 
 Latest sample time and staleness are distinct from the time PitPilot fetched the response. Historical daily summaries remain labeled as summaries. History keeps source and quality separate and preserves bucket minimum and maximum values. Calendar-date snapshots use a calendar axis, without claiming a time of day or timezone.
 
+The native app selects a chart from the measurement's unit and statistic:
+
+- Numeric readings use connected lines with a subtle fill and preserve observed ranges.
+- Boolean values use Off/On lanes; codes use categorical lanes. Mixed buckets do not imply an exact transition time or a fractional state.
+- Counts and period totals use bars. Grouped summaries show the bucket average and range, not an invented cumulative total.
+
+Calendar readings keep their true day spacing, with line breaks for missing days. Timestamped sample lines break at empty buckets and observation gaps longer than 15 minutes. This drawing limit does not establish a source's sampling cadence; bucketed history cannot reconstruct every missing interval. The chart fits available readings within the selected range, uses sparse date labels, and keeps zero values visible. Tap a chart to inspect a bucket or expand reading details for provenance.
+
 ## Private OpenMetrics scraping
 
 Set `PITPILOT_METRICS_TOKEN_FILE` to a file containing a separate random token of at least 32 characters. This opts into `GET /metrics`. Authenticate with `Authorization: Bearer <scrape-token>`. The scrape token grants no garage API access, and the household token cannot substitute for it.

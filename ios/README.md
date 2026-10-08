@@ -13,7 +13,9 @@ bash ../scripts/test-ios.sh
 
 The Xcode project and Info.plist are generated from `project.yml`. Release automation supplies signing, the build number, and optionally `PITPILOT_BASE_URL` to prefill the connection screen. No API token or telemetry ingestion credential belongs in build settings or the application bundle.
 
-Both GitHub iOS jobs use the repository's self-hosted macOS runner. The test helper needs jq and an installed runtime supporting iPhone 17. It prepares accessibility on a disposable simulator, runs the full suite, and removes only that simulator on exit.
+Both GitHub iOS jobs use the repository's self-hosted macOS runner. The test helper needs jq, Ruby, and an installed runtime supporting iPhone 17. Each run has isolated build files and result artifacts. It builds the test targets before booting a disposable simulator, prepares accessibility, runs the full suite, and removes its simulator and build files on exit. Cancellation stops the active child process group.
+
+Before building, the helper can recover an abandoned helper from this checkout only when process ownership, simulator identity, and a completed GitHub run all agree. Unverifiable candidates are left alone; build isolation still applies. The recovery lookup uses GitHub's public API without credentials. `ruby scripts/test-ios-runner-test.rb` checks these guards and cancellation with harmless shell fixtures; it requires Minitest and runs in both native workflows.
 
 The instrument-dial app icon is reproducible:
 
@@ -45,7 +47,11 @@ Vehicle Overview shows only metrics with stored values. Tap fuel, manifold press
 
 History initially shows 30 days for recent readings, or one year when the selected reading type only has older values, so older imported snapshots are visible immediately. You can change the range using the picker. Calendar-only dates remain dates when choosing this default; they do not acquire a fabricated observation time.
 
-History charts preserve timestamped sample endpoints and bucket minimum/maximum ranges without connecting gaps. Calendar-date snapshots use a separate categorical day chart, with unknown time and timezone clearly labeled; the app does not invent midnight observation times. Expand chart values to inspect the numeric envelopes and actual time bounds. Loaded ranges remain readable offline, and a signal refresh failure does not mark unrelated garage functions offline. Collection details expose available diagnostic codes, missing-data coverage and recording segments without interpreting unknown diagnostic results as successful reads.
+Numeric readings use connected lines with a subtle fill. Counts and period totals use bars; boolean values use Off/On lanes, and codes use categorical lanes. Mixed buckets remain visibly Mixed because their exact transition times are unavailable. Grouped counts and totals show the bucket average and observed range, without inventing a cumulative total. Valid zero readings remain visible.
+
+Charts preserve timestamped sample endpoints and bucket minimum/maximum ranges, breaking at empty buckets and long observation gaps. Date-only readings keep their calendar spacing, with breaks for missing days and no invented observation times or timezone. Each source and quality combination stays separate. Sparse date labels and a view fitted to the available data keep dense histories readable.
+
+Tap the chart to inspect a bucket, or expand reading details for provenance and exact values. Loaded ranges remain readable offline, and a signal refresh failure does not mark unrelated garage functions offline. Collection details expose available diagnostic codes, missing-data coverage and recording segments without interpreting unknown diagnostic results as successful reads.
 
 History searches titles, notes, tags, and custom fields. Filter by record type and open an entry to read its full notes, custom fields, and source reference. Undated notes remain undated and do not display invented mileage or spending. Odometer entries distinguish initial and final readings and retain whether the reading was measured, estimated, or unspecified.
 

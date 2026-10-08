@@ -8,11 +8,11 @@ The planned Raspberry Pi integration includes app-guided setup, offline collecti
 
 ## Status
 
-[The current release, v0.3.0](https://github.com/TheOutdoorProgrammer/pitpilot/releases/tag/v0.3.0), adds available vehicle readings to the native dashboard, history charts, private OpenMetrics scraping, and conversion of generated driving and status notes into structured measurements. Readings retain their source, units, quality and actual observation time. Date-only snapshots remain dates, and older readings stay visibly historical. See the [vehicle measurements guide](docs/vehicle-signals.md).
+[The current release, v0.3.1](https://github.com/TheOutdoorProgrammer/pitpilot/releases/tag/v0.3.1), improves native history charts with filled numeric trends, Off/On and code lanes, count bars, and readable date axes. The dashboard, private OpenMetrics endpoint, and generated-note conversion introduced in v0.3.0 retain source, units, quality and actual observation time. Date-only snapshots remain dates, and older readings stay visibly historical. See the [vehicle measurements guide](docs/vehicle-signals.md).
 
 [LubeLogger migration](docs/lubelogger-migration.md) previews changes and applies them atomically, with duplicate prevention and conflict reporting. Supported source data and import blockers are documented in the migration guide.
 
-The iOS app stores its access token in Keychain and caches records and loaded measurement history for offline reading. It does not queue offline changes. Signed test builds are distributed through Fledge to devices included in the provisioning profile. Install version 0.3.0 to view the measurement dashboard and charts; apps older than 0.2.0 cannot read the imported record categories.
+The iOS app stores its access token in Keychain and caches records and loaded measurement history for offline reading. It does not queue offline changes. Signed test builds are distributed through Fledge to devices included in the provisioning profile. [Install version 0.3.1](https://fledge.theoutdoorprogrammer.com/a/com.theoutdoorprogrammer.pitpilot/20f2302fd001) for the updated measurement charts; apps older than 0.2.0 cannot read the imported record categories.
 
 The release includes the cancellation fix from 0.1.1. New refreshes replace older work, while genuine transport failures report a bounded diagnostic category through the authenticated telemetry relay.
 
@@ -76,7 +76,7 @@ bash scripts/test-ios.sh
 
 The Release workflow signs and stages the iOS app, then uses [Quill](https://github.com/TheOutdoorProgrammer/quill) to publish it through [Fledge](https://github.com/TheOutdoorProgrammer/fledge), build Go artifacts with GoReleaser, and publish the container. The Dockerfile copies the prebuilt Go artifacts; it never compiles Go. Release credentials and deployment endpoints are injected through repository secrets.
 
-iOS CI and release jobs use a repository-scoped, self-hosted macOS ARM64 runner with Xcode, an installed iPhone 17 simulator runtime, XcodeGen, and jq. The test helper creates and removes its own simulator. Fork pull requests run backend checks; native CI runs after changes reach a trusted repository branch. Signing uses a temporary keychain and restores the runner's prior keychain state.
+iOS CI and release jobs use a repository-scoped, self-hosted macOS ARM64 runner with Xcode, an installed iPhone 17 simulator runtime, XcodeGen, jq, and Ruby with Minitest. The test helper isolates build files and results per run, creates and removes its own simulator, and forwards cancellation to its child processes. Fork pull requests run backend checks; native CI runs after changes reach a trusted repository branch. Signing uses a temporary keychain and restores the runner's prior keychain state.
 
 Self-hosters can build locally with `goreleaser build --snapshot --clean`, then `docker build --build-arg TARGETARCH=amd64 -t pitpilot:local .`. Mount the database directory, supply a token secret, and run only one server against a database. Container publishing and deployment promotion are separate operations; use the published digest in GitOps.
 
