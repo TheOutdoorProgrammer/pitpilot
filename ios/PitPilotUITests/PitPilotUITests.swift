@@ -293,8 +293,9 @@ final class PitPilotUITests: XCTestCase {
         XCTAssertEqual(updates.value as? String, "0")
         let revoke = app.buttons["revokePi-fixture-device"]
         reveal(revoke, app); revoke.tap()
-        XCTAssertTrue(app.buttons["confirmRevokePi"].waitForExistence(timeout: 5))
-        app.buttons["confirmRevokePi"].tap()
+        let confirmRevoke = app.sheets["Revoke this Pi's access?"].buttons["confirmRevokePi"].firstMatch
+        XCTAssertTrue(confirmRevoke.waitForExistence(timeout: 5))
+        confirmRevoke.tap()
         XCTAssertTrue(app.staticTexts["Access revoked"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.switches["deviceAutoUpdate-fixture-device"].exists)
         capture("Pi access revoked keeps previous readings", app)
@@ -319,8 +320,9 @@ final class PitPilotUITests: XCTestCase {
         capture("Smartcar observed and checked times remain separate", app)
         let disconnect = app.buttons["disconnectSmartcar"]
         reveal(disconnect, app); disconnect.tap()
-        XCTAssertTrue(app.buttons["confirmDisconnectSmartcar"].waitForExistence(timeout: 5))
-        app.buttons["confirmDisconnectSmartcar"].tap()
+        let confirmDisconnect = app.sheets["Disconnect Smartcar?"].buttons["confirmDisconnectSmartcar"].firstMatch
+        XCTAssertTrue(confirmDisconnect.waitForExistence(timeout: 5))
+        confirmDisconnect.tap()
         XCTAssertTrue(app.staticTexts["Not linked"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.buttons["syncSmartcar"].exists)
     }
