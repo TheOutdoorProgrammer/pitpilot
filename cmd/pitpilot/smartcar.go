@@ -13,9 +13,20 @@ import (
 )
 
 func configuredSmartcar(store *garage.Store, logger *slog.Logger) (*smartcar.Service, error) {
+	if enabled := os.Getenv("PITPILOT_SMARTCAR_ENABLED"); enabled != "" {
+		if enabled == "false" {
+			return nil, nil
+		}
+		if enabled != "true" {
+			return nil, errors.New("PITPILOT_SMARTCAR_ENABLED must be true or false")
+		}
+	}
 	application := os.Getenv("PITPILOT_SMARTCAR_APPLICATION_ID")
 	paths := []string{os.Getenv("PITPILOT_SMARTCAR_CLIENT_ID_FILE"), os.Getenv("PITPILOT_SMARTCAR_CLIENT_SECRET_FILE"), os.Getenv("PITPILOT_SMARTCAR_ENCRYPTION_KEY_FILE")}
 	if application == "" && strings.Join(paths, "") == "" {
+		if os.Getenv("PITPILOT_SMARTCAR_ENABLED") == "true" {
+			return nil, errors.New("Smartcar is enabled without configuration")
+		}
 		return nil, nil
 	}
 	if application == "" {

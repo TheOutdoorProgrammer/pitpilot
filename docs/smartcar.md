@@ -12,6 +12,7 @@ The backend reads credentials from mounted files:
 
 | Environment variable | Purpose |
 | --- | --- |
+| `PITPILOT_SMARTCAR_ENABLED` | Optional explicit `false` disables the integration while retaining history and private bindings; otherwise complete configuration enables it |
 | `PITPILOT_SMARTCAR_APPLICATION_ID` | Application UUID used by Connect |
 | `PITPILOT_SMARTCAR_CLIENT_ID_FILE` | File containing the V3 API credential client ID |
 | `PITPILOT_SMARTCAR_CLIENT_SECRET_FILE` | File containing the API credential secret |

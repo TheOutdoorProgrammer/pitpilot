@@ -26,7 +26,7 @@ type Device struct {
 	EnrolledAt *time.Time `json:"enrolledAt,omitempty"`
 	RevokedAt  *time.Time `json:"revokedAt,omitempty"`
 	LastSeenAt *time.Time `json:"lastSeenAt,omitempty"`
-	DeviceHeartbeat
+	*DeviceHeartbeat
 }
 
 type DeviceHeartbeat struct {
@@ -324,7 +324,15 @@ func (s *Store) HeartbeatDevice(ctx context.Context, token string, h DeviceHeart
 	}
 	now := time.Now().UTC()
 	d.LastSeenAt = &now
-	d.DeviceHeartbeat = h
+	if previous := d.DeviceHeartbeat; previous != nil {
+		if previous.LastObservedAt != nil && (h.LastObservedAt == nil || h.LastObservedAt.Before(*previous.LastObservedAt)) {
+			h.LastObservedAt = previous.LastObservedAt
+		}
+		if previous.LastUploadAt != nil && (h.LastUploadAt == nil || h.LastUploadAt.Before(*previous.LastUploadAt)) {
+			h.LastUploadAt = previous.LastUploadAt
+		}
+	}
+	d.DeviceHeartbeat = &h
 	if err = saveDevice(ctx, tx, d); err != nil {
 		return err
 	}

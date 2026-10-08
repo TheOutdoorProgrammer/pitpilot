@@ -17,6 +17,10 @@ func TestDeviceEnrollmentIsOneTimeAndExpires(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	pending, err := json.Marshal(enrollment.Device)
+	if err != nil || strings.Contains(string(pending), "queuedBatches") {
+		t.Fatal("pending pairing invented collector status", err)
+	}
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	success := 0
@@ -143,6 +147,41 @@ func TestDeviceScopeRetriesRevocationAndPrivateState(t *testing.T) {
 	var tokenHash string
 	if err = s.db.QueryRow("SELECT token_hash FROM devices WHERE id=?", d2.DeviceID).Scan(&tokenHash); err != nil || tokenHash != deviceTokenHash(d2.Token) {
 		t.Fatal("unhashed credential storage", err)
+	}
+}
+
+func TestHeartbeatRestartPreservesConfirmedTimes(t *testing.T) {
+	s, id := signalFixture(t)
+	ctx := context.Background()
+	enrollment, err := s.CreateDevice(ctx, id, "Restarting Pi")
+	if err != nil {
+		t.Fatal(err)
+	}
+	device, err := s.EnrollDevice(ctx, enrollment.EnrollmentToken)
+	if err != nil {
+		t.Fatal(err)
+	}
+	observed := time.Now().UTC().Add(-time.Minute)
+	uploaded := observed.Add(time.Second)
+	h := DeviceHeartbeat{Version: "0.4.0", CollectionState: "collecting", UpdateState: "idle", LastObservedAt: &observed, LastUploadAt: &uploaded}
+	if err = s.HeartbeatDevice(ctx, device.Token, h); err != nil {
+		t.Fatal(err)
+	}
+	older := observed.Add(-time.Minute)
+	for _, timestamp := range []*time.Time{nil, &older} {
+		h.LastObservedAt, h.LastUploadAt = timestamp, timestamp
+		h.CollectionState = "starting"
+		if err = s.HeartbeatDevice(ctx, device.Token, h); err != nil {
+			t.Fatal(err)
+		}
+		devices, err := s.Devices(ctx, id)
+		if err != nil || len(devices) != 1 {
+			t.Fatal("read collector status", err)
+		}
+		got := devices[0]
+		if got.LastObservedAt == nil || !got.LastObservedAt.Equal(observed) || got.LastUploadAt == nil || !got.LastUploadAt.Equal(uploaded) || got.CollectionState != "starting" {
+			t.Fatal("restart erased confirmed times or failed to update current state")
+		}
 	}
 }
 
