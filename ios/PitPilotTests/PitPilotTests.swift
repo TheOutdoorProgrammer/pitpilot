@@ -59,6 +59,14 @@ final class PitPilotTests: XCTestCase {
         let zero = SignalHistoryPoint(minimum: 0, maximum: 0, mean: 0, first: 0, last: 0, count: 1, calendarDate: "2026-10-07")
         let zeroChart = SignalChartData(series: SignalHistorySeries(source: "pi", quality: "measured", statistic: "sum", points: [zero, point]), unit: "count", calendar: true)
         XCTAssertEqual(zeroChart.yDomain(unit: "count").lowerBound, 0)
+        let bounds = zeroChart.barBounds(zeroChart.buckets[0])
+        XCTAssertEqual(bounds.upperBound - bounds.lowerBound, 0.65, accuracy: 0.000001)
+        XCTAssertLessThan(bounds.upperBound, zeroChart.barBounds(zeroChart.buckets[1]).lowerBound)
+        let timestamp = SignalHistoryPoint(windowStart: "2026-10-08T00:00:00Z", windowEnd: "2026-10-09T00:00:00Z",
+            minimum: 10, maximum: 20, mean: 15, first: 10, last: 20, count: 2)
+        let daily = SignalChartData(series: SignalHistorySeries(source: "pi", quality: "measured", statistic: "sum", points: [timestamp]), unit: "count", calendar: false)
+        let dailyBounds = daily.barBounds(daily.buckets[0])
+        XCTAssertEqual(dailyBounds.upperBound - dailyBounds.lowerBound, 86400 * 0.65, accuracy: 0.001)
     }
 
     func testLongUniformBooleanWindowShowsEndpointsWithoutHeldState() {

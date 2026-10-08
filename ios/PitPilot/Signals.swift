@@ -271,10 +271,17 @@ struct SignalChartData {
     }
 
     var xDomain: ClosedRange<Double> {
-        let first = buckets.first?.start ?? 0
-        let last = buckets.map(\.end).max() ?? first
+        let first = buckets.map { kind == .bars ? min($0.start, barBounds($0).lowerBound) : $0.start }.min() ?? 0
+        let last = buckets.map { kind == .bars ? max($0.end, barBounds($0).upperBound) : $0.end }.max() ?? first
         let padding = calendar ? 0.5 : max((last - first) * 0.025, 1)
         return (first - padding)...(last + padding)
+    }
+    func barBounds(_ bucket: SignalChartBucket) -> ClosedRange<Double> {
+        let nearest = buckets.map { abs($0.center - bucket.center) }.filter { $0 > 0 }.min()
+        let period = calendar ? 1 : bucket.end - bucket.start
+        let available = period > 0 ? period : nearest ?? 60
+        let halfWidth = min(available, nearest ?? available) * 0.325
+        return (bucket.center - halfWidth)...(bucket.center + halfWidth)
     }
     func yDomain(unit: String) -> ClosedRange<Double> {
         let minimum = buckets.map { $0.point.minimum }.min() ?? 0

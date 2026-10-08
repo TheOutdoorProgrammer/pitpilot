@@ -280,7 +280,7 @@ private struct SignalSeriesChart: View {
                         .foregroundStyle(LinearGradient(colors: [tint.opacity(0.24), tint.opacity(0.015)], startPoint: .top, endPoint: .bottom))
                         .interpolationMethod(.linear).accessibilityHidden(true)
                     LineMark(x: .value("Position", vertex.x), y: .value("Value", vertex.value), series: .value("Segment", vertex.segment))
-                        .foregroundStyle(tint).lineStyle(StrokeStyle(lineWidth: 2.5)).interpolationMethod(.linear)
+                        .foregroundStyle(tint).lineStyle(StrokeStyle(lineWidth: 2.5, lineCap: .round, lineJoin: .round)).interpolationMethod(.linear)
                         .accessibilityHidden(true)
                     PointMark(x: .value("Position", vertex.x), y: .value("Value", vertex.value))
                         .foregroundStyle(tint).symbolSize(data.vertices.count > 30 ? 9 : 30)
@@ -289,7 +289,9 @@ private struct SignalSeriesChart: View {
             }
             ForEach(data.buckets) { bucket in
                 if data.kind == .bars {
-                    BarMark(x: .value("Position", bucket.center), y: .value("Value", bucket.point.mean), width: .ratio(0.65))
+                    let bounds = data.barBounds(bucket)
+                    BarMark(xStart: .value("Bar start", bounds.lowerBound), xEnd: .value("Bar end", bounds.upperBound),
+                            yStart: .value("Baseline", 0), yEnd: .value("Value", bucket.point.mean))
                         .foregroundStyle(tint.gradient)
                         .accessibilityLabel("\(data.xLabel(bucket.center)), \(bucket.point.count > 1 ? "average" : "value")")
                         .accessibilityValue(SignalFormat.value(bucket.point.mean, unit: unit))
@@ -360,8 +362,8 @@ private struct SignalSeriesChart: View {
     }
     @AxisContentBuilder private var timeAxis: some AxisContent {
         AxisMarks(values: data.axisValues) { value in
-            AxisValueLabel {
-                if let number = value.as(Double.self) { Text(data.xLabel(number)).font(.caption2) }
+            AxisValueLabel(anchor: value.index == 0 ? .topLeading : value.index == data.axisValues.count - 1 ? .topTrailing : .top) {
+                if let number = value.as(Double.self) { Text(data.xLabel(number)).font(.caption2).fixedSize() }
             }
         }
     }
