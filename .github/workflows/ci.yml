@@ -66,13 +66,15 @@ jobs:
           persist-credentials: false
       - name: Generate Xcode project
         run: xcodegen generate --spec ios/project.yml
+      - name: Validate native runner cleanup
+        run: ruby scripts/test-ios-runner-test.rb
       - name: Test native app
-        run: bash scripts/test-ios.sh
+        run: exec bash scripts/test-ios.sh
       - name: Preserve synthetic native test results
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: pitpilot-tests-${{ github.run_id }}
-          path: ${{ runner.temp }}/pitpilot-test-results/
+          path: ${{ runner.temp }}/pitpilot-test-results/${{ github.run_id }}-${{ github.run_attempt }}/
           if-no-files-found: ignore
           retention-days: 7
