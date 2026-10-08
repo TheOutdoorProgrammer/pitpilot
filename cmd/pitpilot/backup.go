@@ -35,7 +35,7 @@ func backup(args []string, output io.Writer) (runErr error) {
 	defer stop()
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
-	logger, shutdown, err := telemetry.Start(ctx, version)
+	logger, shutdown, err := telemetry.StartTo(ctx, version, os.Stderr)
 	if err != nil {
 		return errors.New("backup telemetry initialization failed")
 	}

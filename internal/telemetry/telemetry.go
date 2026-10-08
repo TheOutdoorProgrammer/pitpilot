@@ -3,6 +3,7 @@ package telemetry
 import (
 	"context"
 	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -22,7 +23,11 @@ import (
 )
 
 func Start(ctx context.Context, version string) (*slog.Logger, func(context.Context) error, error) {
-	console := slog.NewJSONHandler(os.Stdout, nil)
+	return StartTo(ctx, version, os.Stdout)
+}
+
+func StartTo(ctx context.Context, version string, output io.Writer) (*slog.Logger, func(context.Context) error, error) {
+	console := slog.NewJSONHandler(output, nil)
 	logger := slog.New(correlated{handlers: []slog.Handler{console}})
 	shutdown := func(context.Context) error { return nil }
 	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(propagation.TraceContext{}, propagation.Baggage{}))

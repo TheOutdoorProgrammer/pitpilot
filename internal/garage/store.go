@@ -74,6 +74,12 @@ func Open(filename string) (*Store, error) {
 			return nil, err
 		}
 	}
+	// Early schema 2 rehearsal databases contained only the source mapping table.
+	// Settings are pinned when an import is first applied.
+	if _, err = db.Exec(`CREATE TABLE IF NOT EXISTS import_settings(source TEXT PRIMARY KEY, settings TEXT NOT NULL CHECK(json_valid(settings)));`); err != nil {
+		db.Close()
+		return nil, err
+	}
 	return &Store{db: db}, nil
 }
 
@@ -250,13 +256,19 @@ func affected(result sql.Result, err error) error {
 }
 
 type Export struct {
-	SchemaVersion int               `json:"schemaVersion"`
-	ExportedAt    time.Time         `json:"exportedAt"`
-	Vehicles      []json.RawMessage `json:"vehicles"`
-	Records       []json.RawMessage `json:"records"`
-	Reminders     []json.RawMessage `json:"reminders"`
-	Trips         []json.RawMessage `json:"trips"`
-	ImportSources []ImportedSource  `json:"importSources"`
+	SchemaVersion  int               `json:"schemaVersion"`
+	ExportedAt     time.Time         `json:"exportedAt"`
+	Vehicles       []json.RawMessage `json:"vehicles"`
+	Records        []json.RawMessage `json:"records"`
+	Reminders      []json.RawMessage `json:"reminders"`
+	Trips          []json.RawMessage `json:"trips"`
+	ImportSources  []ImportedSource  `json:"importSources"`
+	ImportSettings []ImportSettings  `json:"importSettings"`
+}
+
+type ImportSettings struct {
+	Source   string          `json:"source"`
+	Settings json.RawMessage `json:"settings"`
 }
 
 type ImportedSource struct {
@@ -273,7 +285,7 @@ type ImportedSource struct {
 func (s *Store) Export(ctx context.Context) (out Export, err error) {
 	ctx, done := operation(ctx, "db.export")
 	defer func() { done(err) }()
-	out = Export{SchemaVersion: 2, ExportedAt: time.Now().UTC(), Vehicles: []json.RawMessage{}, Records: []json.RawMessage{}, Reminders: []json.RawMessage{}, Trips: []json.RawMessage{}, ImportSources: []ImportedSource{}}
+	out = Export{SchemaVersion: 2, ExportedAt: time.Now().UTC(), Vehicles: []json.RawMessage{}, Records: []json.RawMessage{}, Reminders: []json.RawMessage{}, Trips: []json.RawMessage{}, ImportSources: []ImportedSource{}, ImportSettings: []ImportSettings{}}
 	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
 		return out, err
@@ -325,6 +337,25 @@ func (s *Store) Export(ctx context.Context) (out Export, err error) {
 	}
 	err = imports.Err()
 	imports.Close()
+	if err != nil {
+		return out, err
+	}
+	settings, err := tx.QueryContext(ctx, "SELECT source,settings FROM import_settings ORDER BY source")
+	if err != nil {
+		return out, err
+	}
+	for settings.Next() {
+		var v ImportSettings
+		var raw []byte
+		if err = settings.Scan(&v.Source, &raw); err != nil {
+			settings.Close()
+			return out, err
+		}
+		v.Settings = json.RawMessage(raw)
+		out.ImportSettings = append(out.ImportSettings, v)
+	}
+	err = settings.Err()
+	settings.Close()
 	if err != nil {
 		return out, err
 	}

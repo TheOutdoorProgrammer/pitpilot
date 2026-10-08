@@ -42,7 +42,7 @@ func importFixtureBatch(t *testing.T) ImportBatch {
 	t.Helper()
 	archiveID := ImportID(importFixtureSource, "extrafields", "6")
 	archive := json.RawMessage(`{"_id":6,"ExtraFields":[{"Name":"Code","FieldType":"Text","IsRequired":false}]}`)
-	return ImportBatch{Source: importFixtureSource, Items: []ImportItem{
+	return ImportBatch{Source: importFixtureSource, Settings: json.RawMessage(`{"timezone":"UTC","currency":"USD","distanceUnit":"mi","fuelUnit":"us-gal","formatVersion":1}`), Items: []ImportItem{
 		importNoteItem(t, "1", "1", "First source text"),
 		importVehicleItem(t, "1", "Fixture vehicle"),
 		importNoteItem(t, "2", "1", "Second source text"),
@@ -79,7 +79,7 @@ func assertEmptyImportStore(t *testing.T, s *Store) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(export.Vehicles)+len(export.Records)+len(export.Reminders)+len(export.Trips)+len(export.ImportSources) != 0 {
+	if len(export.Vehicles)+len(export.Records)+len(export.Reminders)+len(export.Trips)+len(export.ImportSources)+len(export.ImportSettings) != 0 {
 		t.Fatal("failed or preview-only import changed the database")
 	}
 }
@@ -141,7 +141,7 @@ func TestImportUpdatesChangedSourceAndRetainsRemovedSource(t *testing.T) {
 	if err := json.Unmarshal(raw, &note); err != nil || note.Notes != "Changed upstream text" {
 		t.Fatalf("source update missing: %s %v", raw, err)
 	}
-	removed := ImportBatch{Source: batch.Source, Items: []ImportItem{importVehicleItem(t, "1", "Fixture vehicle")}}
+	removed := ImportBatch{Source: batch.Source, Settings: batch.Settings, Items: []ImportItem{importVehicleItem(t, "1", "Fixture vehicle")}}
 	report = applyFixture(t, s, removed)
 	if report.Retained != 3 {
 		t.Fatalf("removed sources not retained: %+v", report)
@@ -178,6 +178,9 @@ func TestImportPreservesUserEditAndRollsBackAllConflictingChanges(t *testing.T) 
 	before, err := s.Export(context.Background())
 	if err != nil {
 		t.Fatal(err)
+	}
+	if len(before.ImportSettings) != 1 {
+		t.Fatal("source interpretation settings missing from export")
 	}
 	if _, err = s.Import(context.Background(), batch, preview.PreviewToken); !errors.Is(err, ErrImportConflict) {
 		t.Fatalf("conflict applied: %v", err)
@@ -415,5 +418,110 @@ func TestConcurrentImportApplicationsDoNotDuplicate(t *testing.T) {
 	}
 	if len(export.Vehicles) != 1 || len(export.Records) != 2 || len(export.ImportSources) != 4 {
 		t.Fatal("concurrent applications duplicated or dropped data")
+	}
+}
+
+func TestImportPinsSettingsAndRejectsInterpretationChanges(t *testing.T) {
+	s := importStore(t)
+	batch := importFixtureBatch(t)
+	applyFixture(t, s, batch)
+	before, err := s.Export(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(before.ImportSettings) != 1 || before.ImportSettings[0].Source != batch.Source {
+		t.Fatal("settings were not exported with source identity")
+	}
+	var pinned map[string]any
+	if err := json.Unmarshal(before.ImportSettings[0].Settings, &pinned); err != nil {
+		t.Fatal(err)
+	}
+	if pinned["timezone"] != "UTC" || pinned["fuelUnit"] != "us-gal" {
+		t.Fatal("source interpretation was not pinned")
+	}
+	preview, err := s.Import(context.Background(), batch, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	batch.Settings = json.RawMessage(`{"formatVersion":1,"fuelUnit":"us-gal","distanceUnit":"mi","currency":"USD","timezone":"UTC"}`)
+	reordered, err := s.Import(context.Background(), batch, "")
+	if err != nil || reordered.PreviewToken != preview.PreviewToken {
+		t.Fatal("equivalent settings changed preview identity")
+	}
+	batch.Settings = json.RawMessage(`{"formatVersion":1,"fuelUnit":"us-gal","distanceUnit":"mi","currency":"USD","timezone":"America/New_York"}`)
+	for _, token := range []string{"", preview.PreviewToken} {
+		if _, err := s.Import(context.Background(), batch, token); !errors.Is(err, ErrImportSettingsChanged) {
+			t.Fatalf("changed source interpretation was accepted: %v", err)
+		}
+	}
+	after, err := s.Export(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	before.ExportedAt = after.ExportedAt
+	if !reflect.DeepEqual(before, after) {
+		t.Fatal("settings conflict changed historical data or source interpretation")
+	}
+}
+
+func TestImportSettingsRequireCanonicalJSONObject(t *testing.T) {
+	for _, raw := range []string{`null`, `[]`, `"UTC"`, `{"timezone":"UTC","timezone":"America/New_York"}`, `{} {}`} {
+		s := importStore(t)
+		batch := importFixtureBatch(t)
+		batch.Settings = json.RawMessage(raw)
+		if _, err := s.Import(context.Background(), batch, ""); err == nil {
+			t.Fatalf("invalid settings accepted: %s", raw)
+		}
+		assertEmptyImportStore(t, s)
+	}
+	s := importStore(t)
+	batch := importFixtureBatch(t)
+	batch.Settings = nil
+	applyFixture(t, s, batch)
+	export, err := s.Export(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(export.ImportSettings) != 1 || string(export.ImportSettings[0].Settings) != `{}` {
+		t.Fatal("missing internal settings did not use stable empty object")
+	}
+}
+
+func TestImportPreviewBindsSettingsBeforeFirstApply(t *testing.T) {
+	s := importStore(t)
+	batch := importFixtureBatch(t)
+	preview, err := s.Import(context.Background(), batch, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	batch.Settings = json.RawMessage(`{"timezone":"America/New_York"}`)
+	if _, err := s.Import(context.Background(), batch, preview.PreviewToken); !errors.Is(err, ErrImportConflict) {
+		t.Fatal("settings changed between first preview and apply")
+	}
+	assertEmptyImportStore(t, s)
+}
+
+func TestOpenEarlySchemaTwoRehearsalAddsSettingsTable(t *testing.T) {
+	filename := filepath.Join(t.TempDir(), "early-rehearsal.db")
+	s, err := Open(filename)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.Exec("DROP TABLE import_settings"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	s, err = Open(filename)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	batch := importFixtureBatch(t)
+	applyFixture(t, s, batch)
+	export, err := s.Export(context.Background())
+	if err != nil || len(export.ImportSettings) != 1 {
+		t.Fatalf("early rehearsal settings missing: %v", err)
 	}
 }

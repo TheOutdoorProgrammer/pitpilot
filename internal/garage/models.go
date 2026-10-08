@@ -8,19 +8,20 @@ import (
 )
 
 type Vehicle struct {
-	ID            string       `json:"id"`
-	Name          string       `json:"name"`
-	Make          string       `json:"make"`
-	Model         string       `json:"model"`
-	Year          int          `json:"year"`
-	OdometerMiles float64      `json:"odometerMiles"`
-	CreatedAt     time.Time    `json:"createdAt"`
-	VIN           string       `json:"vin,omitempty"`
-	LicensePlate  string       `json:"licensePlate,omitempty"`
-	Notes         string       `json:"notes,omitempty"`
-	Tags          []string     `json:"tags,omitempty"`
-	ExtraFields   []ExtraField `json:"extraFields,omitempty"`
-	Source        *Source      `json:"source,omitempty"`
+	ID             string       `json:"id"`
+	Name           string       `json:"name"`
+	Make           string       `json:"make"`
+	Model          string       `json:"model"`
+	Year           int          `json:"year"`
+	OdometerMiles  float64      `json:"odometerMiles"`
+	OdometerStatus string       `json:"odometerStatus,omitempty"`
+	CreatedAt      time.Time    `json:"createdAt"`
+	VIN            string       `json:"vin,omitempty"`
+	LicensePlate   string       `json:"licensePlate,omitempty"`
+	Notes          string       `json:"notes,omitempty"`
+	Tags           []string     `json:"tags,omitempty"`
+	ExtraFields    []ExtraField `json:"extraFields,omitempty"`
+	Source         *Source      `json:"source,omitempty"`
 }
 
 type Record struct {
@@ -81,6 +82,9 @@ func validTitle(v string) bool { return strings.TrimSpace(v) != "" && len(v) <= 
 func validDate(v string) bool  { _, err := time.Parse(time.DateOnly, v); return err == nil }
 
 func (v Vehicle) Validate() error {
+	if v.OdometerStatus != "" && v.OdometerStatus != "unknown" && v.OdometerStatus != "measured" && v.OdometerStatus != "estimated" {
+		return errors.New("invalid odometer status")
+	}
 	if !validTitle(v.Name) || len(v.Make) > 100 || len(v.Model) > 100 {
 		return errors.New("name is required; vehicle text exceeds allowed length")
 	}

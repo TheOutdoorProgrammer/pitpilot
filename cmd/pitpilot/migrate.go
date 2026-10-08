@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -16,10 +17,13 @@ import (
 
 	"github.com/TheOutdoorProgrammer/pitpilot/internal/garage"
 	"github.com/TheOutdoorProgrammer/pitpilot/internal/lubelogger"
+	"github.com/TheOutdoorProgrammer/pitpilot/internal/telemetry"
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/propagation"
 )
 
-func migrate(args []string, output io.Writer) error {
+func migrate(args []string, output io.Writer) (runErr error) {
 	f := flag.NewFlagSet("migrate-lubelogger", flag.ContinueOnError)
 	f.SetOutput(output)
 	input := f.String("input", "", "private JSON export from tools/lubelogger-extract")
@@ -63,8 +67,27 @@ func migrate(args []string, output io.Writer) error {
 	summary.ExcludedSecurityRecords = excluded
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
+	logger, shutdown, err := telemetry.StartTo(ctx, version, os.Stderr)
+	if err != nil {
+		return errors.New("migration telemetry initialization failed")
+	}
+	defer func() {
+		stop, done := context.WithTimeout(context.Background(), 10*time.Second)
+		defer done()
+		if shutdown(stop) != nil {
+			runErr = errors.Join(runErr, errors.New("migration telemetry shutdown failed"))
+		}
+	}()
 	ctx, span := otel.Tracer("pitpilot/migration").Start(ctx, "migration.lubelogger.cli")
 	defer span.End()
+	defer func() {
+		if runErr != nil {
+			span.SetStatus(codes.Error, "migration failed")
+			logger.ErrorContext(ctx, "migration failed")
+		} else {
+			logger.InfoContext(ctx, "migration completed", "apply_requested", *apply != "")
+		}
+	}()
 	if *database != "" {
 		store, err := garage.Open(*database)
 		if err != nil {
@@ -72,6 +95,9 @@ func migrate(args []string, output io.Writer) error {
 		}
 		defer store.Close()
 		report, err := store.Import(ctx, batch, *apply)
+		if errors.Is(err, garage.ErrImportSettingsChanged) {
+			return garage.ErrImportSettingsChanged
+		}
 		if err != nil && !errors.Is(err, garage.ErrImportConflict) {
 			return errors.New("migration transaction failed")
 		}
@@ -112,6 +138,7 @@ func migrate(args []string, output io.Writer) error {
 	}
 	httpRequest.Header.Set("Content-Type", "application/json")
 	httpRequest.Header.Set("Authorization", "Bearer "+credential)
+	otel.GetTextMapPropagator().Inject(ctx, propagation.HeaderCarrier(httpRequest.Header))
 	client := &http.Client{Timeout: 2 * time.Minute, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	response, err := client.Do(httpRequest)
 	if err != nil {
@@ -129,8 +156,22 @@ func migrate(args []string, output io.Writer) error {
 		garage.ImportReport
 		Source lubelogger.Summary `json:"source"`
 	}
+	if response.StatusCode == 409 {
+		var failure struct {
+			Error string `json:"error"`
+		}
+		if json.Unmarshal(result, &failure) == nil && failure.Error != "" {
+			return errors.New("source interpretation conflicts with the first import; use its original settings")
+		}
+	}
 	if json.Unmarshal(result, &report) != nil {
 		return errors.New("invalid migration report")
+	}
+	if tokenBytes, e := hex.DecodeString(report.PreviewToken); e != nil || len(tokenBytes) != 32 || report.Created < 0 || report.Updated < 0 || report.Skipped < 0 || report.Conflicts < 0 || report.Retained < 0 {
+		return errors.New("incomplete migration report")
+	}
+	if response.StatusCode == 200 && report.Applied != (*apply != "") {
+		return errors.New("server did not confirm the requested migration operation")
 	}
 	report.Source.ExcludedSecurityRecords += excluded
 	if err = json.NewEncoder(output).Encode(report); err != nil {

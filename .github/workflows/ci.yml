@@ -13,6 +13,21 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  extractor:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '9.0.x'
+      - name: Verify optional snapshot extractor with synthetic data
+        env:
+          DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+          DOTNET_GENERATE_ASPNET_CERTIFICATE: 'false'
+        run: |
+          dotnet restore tools/lubelogger-extract/LubeLoggerExtract.csproj --locked-mode
+          dotnet build tools/lubelogger-extract/LubeLoggerExtract.csproj -c Release --no-restore
+          dotnet tools/lubelogger-extract/bin/Release/net9.0/lubelogger-extract.dll --self-test
   backend:
     runs-on: ubuntu-latest
     steps:
@@ -53,3 +68,11 @@ jobs:
         run: xcodegen generate --spec ios/project.yml
       - name: Test native app
         run: bash scripts/test-ios.sh
+      - name: Preserve synthetic native test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pitpilot-tests-${{ github.run_id }}
+          path: ${{ runner.temp }}/pitpilot-test-results/
+          if-no-files-found: ignore
+          retention-days: 7

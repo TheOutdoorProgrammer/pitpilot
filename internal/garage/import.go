@@ -15,6 +15,7 @@ import (
 )
 
 var ErrImportConflict = errors.New("migration has conflicts or its preview is stale")
+var ErrImportSettingsChanged = errors.New("source interpretation settings differ from the existing import")
 
 // ImportItem keeps the source document independent of its editable projection.
 type ImportItem struct {
@@ -28,8 +29,9 @@ type ImportItem struct {
 }
 
 type ImportBatch struct {
-	Source string       `json:"source"`
-	Items  []ImportItem `json:"items"`
+	Source   string          `json:"source"`
+	Settings json.RawMessage `json:"settings"`
+	Items    []ImportItem    `json:"items"`
 }
 
 type ImportReport struct {
@@ -75,6 +77,16 @@ func (s *Store) Import(ctx context.Context, batch ImportBatch, applyToken string
 	defer func() { done(err) }()
 	if batch.Source == "" || len(batch.Source) > 100 || len(batch.Items) == 0 || len(batch.Items) > 100000 {
 		return report, errors.New("invalid migration batch")
+	}
+	if len(batch.Settings) == 0 {
+		batch.Settings = json.RawMessage(`{}`)
+	}
+	if len(batch.Settings) > 4096 {
+		return report, errors.New("migration settings exceed allowed length")
+	}
+	batch.Settings, err = canonical(batch.Settings)
+	if err != nil || len(batch.Settings) == 0 || batch.Settings[0] != '{' {
+		return report, errors.New("migration settings must be a JSON object")
 	}
 	sort.Slice(batch.Items, func(i, j int) bool {
 		if batch.Items[i].Kind == "vehicle" && batch.Items[j].Kind != "vehicle" {
@@ -124,6 +136,14 @@ func (s *Store) Import(ctx context.Context, batch ImportBatch, applyToken string
 		return report, err
 	}
 	defer tx.Rollback()
+	var existingSettings []byte
+	err = tx.QueryRowContext(ctx, "SELECT settings FROM import_settings WHERE source=?", batch.Source).Scan(&existingSettings)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return report, err
+	}
+	if err == nil && !bytes.Equal(existingSettings, batch.Settings) {
+		return report, ErrImportSettingsChanged
+	}
 	input, _ := json.Marshal(batch)
 	h := sha256.New()
 	h.Write(input)
@@ -215,6 +235,9 @@ func (s *Store) Import(ctx context.Context, batch ImportBatch, applyToken string
 	}
 	if report.Conflicts > 0 || applyToken != report.PreviewToken {
 		return report, ErrImportConflict
+	}
+	if _, err = tx.ExecContext(ctx, "INSERT INTO import_settings(source,settings) VALUES(?,?) ON CONFLICT(source) DO NOTHING", batch.Source, string(batch.Settings)); err != nil {
+		return report, err
 	}
 	for _, change := range changes {
 		v := change.item

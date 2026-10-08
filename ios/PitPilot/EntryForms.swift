@@ -23,6 +23,7 @@ struct AddVehicleView: View {
     @State private var model = ""
     @State private var year = ""
     @State private var mileage = "0"
+    @State private var odometerStatus = "unknown"
     @State private var working = false
     @State private var error: String?
     private var parsedYear: Int? { year.isEmpty ? 0 : Int(year) }
@@ -39,6 +40,9 @@ struct AddVehicleView: View {
                     LabeledContent("Model") { TextField("Model", text: $model).multilineTextAlignment(.trailing) }
                     LabeledContent("Year") { TextField("Optional", text: $year).keyboardType(.numberPad).multilineTextAlignment(.trailing) }
                     LabeledContent("Odometer (mi)") { TextField("Odometer in miles", text: $mileage).keyboardType(.decimalPad).multilineTextAlignment(.trailing) }
+                    Picker("Reading method", selection: $odometerStatus) {
+                        Text("Unspecified").tag("unknown"); Text("Measured").tag("measured"); Text("Estimated").tag("estimated")
+                    }
                 }
                 if let error { Text(error).foregroundStyle(.red) }
             }.navigationTitle(vehicle == nil ? "Add vehicle" : "Edit vehicle").navigationBarTitleDisplayMode(.inline)
@@ -49,6 +53,7 @@ struct AddVehicleView: View {
                         name = vehicle.name; make = vehicle.make; model = vehicle.model
                         year = vehicle.year == 0 ? "" : String(vehicle.year)
                         mileage = String(vehicle.odometerMiles)
+                        odometerStatus = vehicle.odometerStatus ?? "unknown"
                     }
                 }
         }
@@ -65,6 +70,7 @@ struct AddVehicleView: View {
                 if vehicle?.model != model { body["model"] = model }
                 if vehicle?.year != year { body["year"] = year }
                 if vehicle?.odometerMiles != miles { body["odometerMiles"] = miles }
+                if (vehicle?.odometerStatus ?? "unknown") != odometerStatus { body["odometerStatus"] = odometerStatus }
                 if let vehicle { if !body.isEmpty { try await store.updateVehicle(vehicle.id, values: body) } }
                 else { try await store.createVehicle(body) }
                 dismiss()

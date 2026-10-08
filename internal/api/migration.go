@@ -35,6 +35,10 @@ func (s *Server) migrateLubeLogger(apply bool) http.HandlerFunc {
 			token = request.PreviewToken
 		}
 		report, err := s.store.Import(ctx, batch, token)
+		if errors.Is(err, garage.ErrImportSettingsChanged) {
+			fail(w, 409, "source interpretation differs from the first import; use its original settings")
+			return
+		}
 		if errors.Is(err, garage.ErrImportConflict) {
 			respond(w, 409, report)
 			return

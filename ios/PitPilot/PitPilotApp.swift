@@ -123,11 +123,15 @@ struct VehicleCard: View {
                 Spacer()
                 Image(systemName: "car.side.fill").font(.system(size: 34)).foregroundStyle(PitStyle.amber).accessibilityHidden(true)
             }
-            HStack(alignment: .firstTextBaseline, spacing: 6) {
-                Text(vehicle.odometerMiles.formatted(.number.precision(.fractionLength(0)))).font(.system(.largeTitle, design: .rounded, weight: .heavy)).monospacedDigit().foregroundStyle(.white)
-                Text("mi").foregroundStyle(.secondary)
-                Spacer()
-                Image(systemName: "arrow.up.right").foregroundStyle(PitStyle.amber).accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(vehicle.odometerStatus == "estimated" ? "Estimated odometer" : "Odometer")
+                    .font(.caption.weight(.semibold)).foregroundStyle(vehicle.odometerStatus == "estimated" ? PitStyle.amber : .secondary)
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text(vehicle.odometerMiles.formatted(.number.precision(.fractionLength(0)))).font(.system(.largeTitle, design: .rounded, weight: .heavy)).monospacedDigit().foregroundStyle(.white)
+                    Text("mi").foregroundStyle(.secondary)
+                    Spacer()
+                    Image(systemName: "arrow.up.right").foregroundStyle(PitStyle.amber).accessibilityHidden(true)
+                }
             }
             Rectangle().fill(PitStyle.amber).frame(height: 3)
         }.padding(24).background(LinearGradient(colors: [PitStyle.panel, PitStyle.panel.opacity(0.6)], startPoint: .topLeading, endPoint: .bottomTrailing), in: RoundedRectangle(cornerRadius: 24))

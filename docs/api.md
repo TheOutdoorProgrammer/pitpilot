@@ -30,7 +30,7 @@ All IDs are opaque strings. Mileage is explicitly in miles, liquid volume in US 
 - Reminder: `id`, `vehicleId`, `title`, nullable `dueDate`, nullable `dueOdometerMiles`, `completed`. At least one due threshold is required. Optional `recurrence` contains positive `miles`, `months` or `days`, and `fixedIntervals`. Calendar intervals match a date threshold; mileage intervals match a mileage threshold. Completion history remains planned.
 - Trip: `id`, `vehicleId`, `title`, `startedAt`, `endedAt`, `distanceMiles`, `points`. Points contain `latitude`, `longitude`, and `recordedAt`, in timestamp order within the trip. A trip is limited to 20,000 points and 31 days. Imported distance is supplied by the caller; PitPilot does not infer a route or an odometer from it.
 
-Vehicles, records and reminders can contain `tags`, `extraFields` and read-only `source` provenance (`system`, `instance`, `collection`, `id`). Extra fields contain `name`, `value`, `isRequired`, and `fieldType` (text 0, integer 1, decimal 2, date 3, time 4, location 5). Vehicle metadata includes `vin`, `licensePlate` and `notes`. Records also support `pinned`, `initialOdometerMiles`, `odometerStatus` (`unknown`, `measured`, `estimated`) and `fuel` (`fillToFull`, `missedFill`).
+Vehicles, records and reminders can contain `tags`, `extraFields` and read-only `source` provenance (`system`, `instance`, `collection`, `id`). Extra fields contain `name`, `value`, `isRequired`, and `fieldType` (text 0, integer 1, decimal 2, date 3, time 4, location 5). Vehicle metadata includes `vin`, `licensePlate`, `notes` and `odometerStatus` (`unknown`, `measured`, `estimated`). Changing vehicle mileage without supplying its status resets provenance to unknown. Records also support `pinned`, `initialOdometerMiles`, `odometerStatus` and `fuel` (`fillToFull`, `missedFill`).
 
 Planned work requires `plan`: `status` (`planned`, `in-progress`, `testing`, `blocked`, `done`), `priority` (`low`, `normal`, `high`, `critical`), `recordKind`, optional `createdAt`, `modifiedAt`, and `reminderIds`. Marking a plan done does not create a service expense. Record and reminder PATCH requests are sparse and preserve unspecified source and future metadata; identity, source and record kind are immutable.
 
@@ -50,7 +50,7 @@ The native client reports `operation`, `durationMs`, and `statusCode` through th
 
 ## Export and backup
 
-Exports contain `schemaVersion: 2`, `exportedAt`, `vehicles`, `records`, `reminders`, `trips` and `importSources`. Import sources retain source identities, original domain JSON and reconciliation hashes. The database snapshot is read in one transaction. Protect exported files as personal data. A general JSON restore endpoint is not yet available.
+Exports contain `schemaVersion: 2`, `exportedAt`, `vehicles`, `records`, `reminders`, `trips`, `importSources` and `importSettings`. Import sources retain source identities, original domain JSON and reconciliation hashes. Import settings pin the interpretation first used for each source; mismatched later settings return `409`. The database snapshot is read in one transaction. Protect exported files as personal data. A general JSON restore endpoint is not yet available.
 
 For a complete backup, stop the single server instance, copy the entire database directory including any SQLite WAL files, and restart it. Restore the directory with the service stopped and the same file permissions. Test the restored instance before replacing the original. Never run two replicas against the SQLite volume.
 

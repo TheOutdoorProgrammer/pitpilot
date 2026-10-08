@@ -84,6 +84,7 @@ final class PitPilotUITests: XCTestCase {
         app.staticTexts["Synthetic route truck"].tap()
         let information = app.buttons["vehicleInformation"]
         XCTAssertTrue(information.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Estimated odometer")).firstMatch.exists)
         information.tap()
         XCTAssertTrue(app.staticTexts["SYNTHETIC-VIN"].exists)
         XCTAssertTrue(app.staticTexts["TEST-ONLY"].exists)

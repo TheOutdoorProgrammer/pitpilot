@@ -15,6 +15,7 @@ struct Vehicle: Codable, Identifiable, Hashable {
     var tags: [String]?
     var extraFields: [ExtraField]?
     var source: RecordSource?
+    var odometerStatus: String?
     var subtitle: String { [year > 0 ? String(year) : "", make, model].filter { !$0.isEmpty }.joined(separator: " ") }
 }
 

@@ -154,16 +154,17 @@ func (s *Server) createVehicle(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) updateVehicle(w http.ResponseWriter, r *http.Request) {
 	var patch struct {
-		Name          *string              `json:"name"`
-		Make          *string              `json:"make"`
-		Model         *string              `json:"model"`
-		Year          *int                 `json:"year"`
-		OdometerMiles *float64             `json:"odometerMiles"`
-		VIN           *string              `json:"vin"`
-		LicensePlate  *string              `json:"licensePlate"`
-		Notes         *string              `json:"notes"`
-		Tags          *[]string            `json:"tags"`
-		ExtraFields   *[]garage.ExtraField `json:"extraFields"`
+		Name           *string              `json:"name"`
+		Make           *string              `json:"make"`
+		Model          *string              `json:"model"`
+		Year           *int                 `json:"year"`
+		OdometerMiles  *float64             `json:"odometerMiles"`
+		OdometerStatus *string              `json:"odometerStatus"`
+		VIN            *string              `json:"vin"`
+		LicensePlate   *string              `json:"licensePlate"`
+		Notes          *string              `json:"notes"`
+		Tags           *[]string            `json:"tags"`
+		ExtraFields    *[]garage.ExtraField `json:"extraFields"`
 	}
 	if !decode(w, r, &patch) {
 		return
@@ -184,6 +185,10 @@ func (s *Server) updateVehicle(w http.ResponseWriter, r *http.Request) {
 		}
 		if patch.OdometerMiles != nil {
 			v.OdometerMiles = *patch.OdometerMiles
+			v.OdometerStatus = "unknown"
+		}
+		if patch.OdometerStatus != nil {
+			v.OdometerStatus = *patch.OdometerStatus
 		}
 		if patch.VIN != nil {
 			v.VIN = *patch.VIN

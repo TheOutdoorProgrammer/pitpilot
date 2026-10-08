@@ -45,9 +45,13 @@ xcrun simctl spawn "$device_id" defaults write com.apple.Accessibility Applicati
 xcrun simctl spawn "$device_id" defaults write com.apple.Accessibility AutomationEnabled -int 1
 xcrun simctl shutdown "$device_id"
 xcrun simctl bootstatus "$device_id" -b
+results_root="${RUNNER_TEMP:-${TMPDIR:-/tmp}}/pitpilot-test-results"
+mkdir -p "$results_root"
+results_directory="$(mktemp -d "$results_root/run-XXXXXXXX")"
 xcodebuild test \
   -project ios/PitPilot.xcodeproj \
   -scheme PitPilot \
   -destination "platform=iOS Simulator,id=$device_id" \
   -destination-timeout 120 \
+  -resultBundlePath "$results_directory/PitPilot.xcresult" \
   -parallel-testing-enabled NO

@@ -10,6 +10,7 @@ final class UITestProtocol: URLProtocol {
         var vehicle: [String: Any] = ["id": "test-vehicle", "name": "Synthetic route truck", "make": "", "model": "", "year": 2002, "odometerMiles": 120000, "createdAt": "2026-01-01T00:00:00Z"]
         if migration {
             vehicle["vin"] = "SYNTHETIC-VIN"
+            vehicle["odometerStatus"] = "estimated"
             vehicle["licensePlate"] = "TEST-ONLY"
             vehicle["extraFields"] = [["name": "Registration region", "value": "Synthetic region", "isRequired": false, "fieldType": 0]]
             vehicle["source"] = ["system": "lubelogger", "instance": "synthetic", "collection": "vehicles", "id": "1"]
@@ -78,7 +79,7 @@ final class UITestProtocol: URLProtocol {
             if Self.migration, body["completed"] as? Bool == true {
                 if let miles = body["completionOdometerMiles"] as? Double,
                    let expected = body["expectedDueOdometerMiles"] as? Double,
-                   expected == (Self.reminders[0]["dueOdometerMiles"] as? Double) {
+                   expected == (Self.reminders[0]["dueOdometerMiles"] as? NSNumber)?.doubleValue {
                     Self.reminders[0]["dueOdometerMiles"] = miles + 5000
                     Self.reminders[0]["completed"] = false
                     response = Self.reminders[0]

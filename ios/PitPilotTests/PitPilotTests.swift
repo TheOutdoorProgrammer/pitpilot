@@ -59,6 +59,9 @@ final class PitPilotTests: XCTestCase {
         XCTAssertEqual(cachedVehicle.notes, "Original vehicle note")
         XCTAssertEqual(cachedVehicle.extraFields?.first?.value, "Synthetic region")
         XCTAssertEqual(cachedVehicle.source?.collection, "vehicles")
+        var estimatedVehicle = cachedVehicle
+        estimatedVehicle.odometerStatus = "estimated"
+        XCTAssertEqual(try JSONDecoder().decode(Vehicle.self, from: JSONEncoder().encode(estimatedVehicle)).odometerStatus, "estimated")
         let record = try JSONDecoder().decode(VehicleRecord.self, from: Data(#"{"id":"n","vehicleId":"v","kind":"note","date":"","title":"Collector journal","notes":"First line\nSecond line","odometerMiles":0,"costCents":0,"pinned":true,"tags":["collector"],"extraFields":[{"name":"Sensor","value":"7.25","isRequired":false,"fieldType":2}],"source":{"system":"lubelogger","instance":"synthetic","collection":"notes","id":"12"}}"#.utf8))
         let cached = try JSONDecoder().decode(VehicleRecord.self, from: JSONEncoder().encode(record))
         XCTAssertEqual(cached.dateLabel, "Undated")

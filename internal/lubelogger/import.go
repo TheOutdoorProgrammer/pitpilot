@@ -47,6 +47,7 @@ type Request struct {
 	PreviewToken string  `json:"previewToken,omitempty"`
 }
 type Summary struct {
+	Interpretation          Options        `json:"interpretation"`
 	Counts                  map[string]int `json:"counts"`
 	ExcludedSecurityRecords int            `json:"excludedSecurityRecords"`
 	ArchivedDefinitions     int            `json:"archivedDefinitions"`
@@ -182,7 +183,7 @@ func identity(b json.RawMessage) (string, error) {
 }
 
 func Convert(req Request) (batch garage.ImportBatch, summary Summary, err error) {
-	summary = Summary{Counts: map[string]int{}, Warnings: []string{}}
+	summary = Summary{Interpretation: req.Options, Counts: map[string]int{}, Warnings: []string{}}
 	o := req.Options
 	if strings.TrimSpace(o.Source) == "" || len(o.Source) > 100 || strings.ContainsAny(o.Source, "\r\n\t") {
 		return batch, summary, errors.New("a stable source name is required")
@@ -204,6 +205,10 @@ func Convert(req Request) (batch garage.ImportBatch, summary Summary, err error)
 		return batch, summary, errors.New("source contains no vehicles")
 	}
 	batch.Source = o.Source
+	batch.Settings, _ = json.Marshal(struct {
+		Options
+		FormatVersion int `json:"formatVersion"`
+	}{o, req.Export.FormatVersion})
 	keys := make([]string, 0, len(req.Export.Collections))
 	for k := range req.Export.Collections {
 		keys = append(keys, k)
@@ -211,6 +216,7 @@ func Convert(req Request) (batch garage.ImportBatch, summary Summary, err error)
 	sort.Strings(keys)
 	vehicles := map[string]string{}
 	odometers := map[string]float64{}
+	odometerStatus := map[string]string{}
 	for _, raw := range req.Export.Collections["vehicles"] {
 		var d document
 		if json.Unmarshal(raw, &d) != nil {
@@ -253,6 +259,9 @@ func Convert(req Request) (batch garage.ImportBatch, summary Summary, err error)
 				}
 				if r.Kind != "plan" && r.Kind != "note" && r.OdometerMiles > odometers[r.VehicleID] {
 					odometers[r.VehicleID] = r.OdometerMiles
+					odometerStatus[r.VehicleID] = r.OdometerStatus
+				} else if r.OdometerMiles == odometers[r.VehicleID] && r.OdometerStatus == "estimated" {
+					odometerStatus[r.VehicleID] = "estimated"
 				}
 			}
 		}
@@ -265,6 +274,10 @@ func Convert(req Request) (batch garage.ImportBatch, summary Summary, err error)
 		var v garage.Vehicle
 		_ = json.Unmarshal(item.Data, &v)
 		v.OdometerMiles = odometers[v.ID]
+		v.OdometerStatus = odometerStatus[v.ID]
+		if v.OdometerStatus == "" {
+			v.OdometerStatus = "unknown"
+		}
 		item.Data, _ = json.Marshal(v)
 	}
 	if err := validateRelationships(batch.Items); err != nil {

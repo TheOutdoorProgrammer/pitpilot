@@ -37,6 +37,8 @@ pitpilot migrate-lubelogger \
 
 Use values verified for your source. `--source` is a stable namespace, not an endpoint or credential. Reuse it for every snapshot from the same installation. Changing it creates a different import identity and can create another copy of your garage.
 
+The first successful import pins its timezone, currency, units and export version. Later imports using that source name reject different interpretation settings, preventing a changed timezone from silently shifting historical dates.
+
 Without `--apply`, the command previews only. It reports source counts, exact integer cost totals, created/updated/skipped/conflicting objects, records retained after source removal, and a `previewToken`. A local rehearsal creates the database/schema but imports no records during preview.
 
 Repeat the command with `--apply TOKEN_FROM_PREVIEW` to commit the rehearsal. An outdated preview or any conflict aborts the entire transaction. Repeat a fresh preview after application: an unchanged snapshot should report every object skipped, with no creates or updates. Reconcile record counts, totals, notes, dates, custom fields, relationships and estimated readings before proceeding.
