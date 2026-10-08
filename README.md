@@ -2,15 +2,17 @@
 
 Vehicle maintenance, trip history, and connected vehicle data, with a Go backend and a native iOS app.
 
-PitPilot brings maintenance records and driving history into one application. The initial implementation provides a native garage and a persistent Go API. Built-in Smartcar and Raspberry Pi collection are planned next; the full replacement scope is tracked in the [feature checklist](FEATURES.md).
+PitPilot brings maintenance records, driving history and vehicle measurements into one application, with a native garage and a persistent Go API. Built-in Smartcar and Raspberry Pi collection are planned next; the full replacement scope is tracked in the [feature checklist](FEATURES.md).
 
 The planned Raspberry Pi integration includes app-guided setup, offline collection, and automatic signed updates with rollback. Routine setup and troubleshooting should not require SSH.
 
 ## Status
 
-[The current release, v0.2.0](https://github.com/TheOutdoorProgrammer/pitpilot/releases/tag/v0.2.0), adds [LubeLogger migration](docs/lubelogger-migration.md), undated notes, custom fields, odometer provenance, planned work, metadata-preserving edits, and recurring reminders to the native garage. Migration previews changes and applies them atomically, with duplicate prevention and conflict reporting. Supported source data and import blockers are documented in the migration guide.
+[The current release, v0.3.0](https://github.com/TheOutdoorProgrammer/pitpilot/releases/tag/v0.3.0), adds available vehicle readings to the native dashboard, history charts, private OpenMetrics scraping, and conversion of generated driving and status notes into structured measurements. Readings retain their source, units, quality and actual observation time. Date-only snapshots remain dates, and older readings stay visibly historical. See the [vehicle measurements guide](docs/vehicle-signals.md).
 
-The iOS app stores its access token in Keychain and caches records for offline reading. It does not queue offline changes. Signed test builds are distributed through Fledge to devices included in the provisioning profile. Install version 0.2.0 before importing: older apps cannot read the new record categories.
+[LubeLogger migration](docs/lubelogger-migration.md) previews changes and applies them atomically, with duplicate prevention and conflict reporting. Supported source data and import blockers are documented in the migration guide.
+
+The iOS app stores its access token in Keychain and caches records and loaded measurement history for offline reading. It does not queue offline changes. Signed test builds are distributed through Fledge to devices included in the provisioning profile. Install version 0.3.0 to view the measurement dashboard and charts; apps older than 0.2.0 cannot read the imported record categories.
 
 The release includes the cancellation fix from 0.1.1. New refreshes replace older work, while genuine transport failures report a bounded diagnostic category through the authenticated telemetry relay.
 

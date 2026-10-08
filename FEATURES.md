@@ -62,12 +62,16 @@ Connection recovery: [v0.1.1](https://github.com/TheOutdoorProgrammer/pitpilot/r
 
 ### Native vehicle measurements
 
-- [ ] Store canonical readings from Pi and Smartcar sources with idempotent ingestion, source time, units and quality.
-- [ ] Preserve date-only snapshots and daily aggregates separately from timestamped samples.
-- [ ] Show available values on the native vehicle dashboard with provenance and stale-state labels.
-- [ ] Open a historical chart from each metric, retaining ranges and gaps when history is downsampled.
-- [ ] Provide an opt-in OpenMetrics endpoint with a separate read-only credential.
-- [ ] Convert complete generated driving and status notes transactionally, preserving structured diagnostics and original evidence before removing visible notes.
+- [x] Store canonical readings from Pi and Smartcar sources with idempotent ingestion, source time, units and quality.
+- [x] Preserve date-only snapshots and daily aggregates separately from timestamped samples.
+- [x] Show available values on the native vehicle dashboard with provenance and stale-state labels.
+- [x] Open a historical chart from each metric, retaining ranges and gaps when history is downsampled.
+- [x] Provide an opt-in OpenMetrics endpoint with a separate read-only credential.
+- [x] Convert complete generated driving and status notes transactionally, preserving structured diagnostics and original evidence before removing visible notes.
+
+Released in [v0.3.0](https://github.com/TheOutdoorProgrammer/pitpilot/releases/tag/v0.3.0). [CI](https://github.com/TheOutdoorProgrammer/pitpilot/actions/runs/37839135928) and the [release workflow](https://github.com/TheOutdoorProgrammer/pitpilot/actions/runs/37841936465) passed backend checks, 23 native unit tests and six UI journeys on the self-hosted runner. Portrait dashboard, chart, offline, error and empty states were reviewed. Landscape screenshot capture needs correction, and physical-device validation remains pending.
+
+Deployed acceptance verified ingestion, retry and conflict behavior, preserved history ranges, valid zero readings, independent scraper authorization, and correlated operational telemetry. Generated-note conversion passed source reconciliation and preservation checks; repeat conversion had no work, and a restored backup skipped unchanged source imports without recreating notes. The common ingestion API is ready for adapters; built-in Pi enrollment, Smartcar authorization and existing collector cutover remain separate work below.
 
 ### Raspberry Pi integration
 
