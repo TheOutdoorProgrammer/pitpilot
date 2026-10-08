@@ -9,8 +9,9 @@ archive="$RUNNER_TEMP/PitPilot.xcarchive"
 export_dir="$RUNNER_TEMP/pitpilot-export"
 signing_config="$RUNNER_TEMP/pitpilot-signing.xcconfig"
 export_options="$RUNNER_TEMP/pitpilot-export.plist"
-original_keychain="$(security default-keychain -d user | tr -d '"' | xargs)"
-trap 'security default-keychain -d user -s "$original_keychain"' EXIT
+archive_keychain_state="$RUNNER_TEMP/pitpilot-archive-keychain-state.json"
+ruby scripts/release-keychain.rb save "$archive_keychain_state"
+trap 'ruby scripts/release-keychain.rb restore "$archive_keychain_state"' EXIT
 security unlock-keychain -p "$SIGNING_KEYCHAIN_PASSWORD" "$SIGNING_KEYCHAIN"
 security default-keychain -d user -s "$SIGNING_KEYCHAIN"
 
