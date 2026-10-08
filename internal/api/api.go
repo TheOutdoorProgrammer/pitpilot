@@ -22,6 +22,12 @@ type Server struct {
 }
 
 func New(store *garage.Store, token string, logger *slog.Logger) (http.Handler, error) {
+	return NewWithOptions(store, token, logger, Options{})
+}
+
+type Options struct{ MetricsToken string }
+
+func NewWithOptions(store *garage.Store, token string, logger *slog.Logger, options Options) (http.Handler, error) {
 	if len(token) < 32 {
 		return nil, errors.New("API token must contain at least 32 bytes")
 	}
@@ -55,6 +61,14 @@ func New(store *garage.Store, token string, logger *slog.Logger) (http.Handler, 
 	register("GET /api/v1/export", s.export)
 	register("POST /api/v1/client-events", s.clientEvent)
 	s.registerMigration(register)
+	s.registerSignals(register)
+	if options.MetricsToken != "" {
+		if len(options.MetricsToken) < 32 || options.MetricsToken == token || strings.ContainsAny(options.MetricsToken, " \t\r\n\x00") {
+			return nil, errors.New("metrics token must be distinct and contain at least 32 bytes")
+		}
+		metricsAuth := &Server{token: sha256.Sum256([]byte(options.MetricsToken))}
+		mux.Handle("GET /metrics", metricsAuth.authenticate(s.metrics))
+	}
 	return telemetry.HTTP(mux, logger), nil
 }
 

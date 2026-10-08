@@ -7,7 +7,7 @@ struct VehicleDetailView: View {
     private let initialVehicle: Vehicle
     private var vehicle: Vehicle { store.vehicles.first(where: { $0.id == initialVehicle.id }) ?? initialVehicle }
     init(vehicle: Vehicle) { initialVehicle = vehicle }
-    @State private var selected = "History"
+    @State private var selected = "Overview"
     private enum Sheet: String, Identifiable { case record, reminder, vehicle; var id: String { rawValue } }
     @State private var sheet: Sheet?
     @State private var confirmDeleteVehicle = false
@@ -42,9 +42,10 @@ struct VehicleDetailView: View {
                 if store.offline { OfflineBanner(date: store.cache.updatedAt) }
                 if let error = store.error { Text(error).font(.callout).foregroundStyle(.orange) }
                 Picker("Vehicle section", selection: $selected) {
-                    ForEach(["History", "Upcoming", "Trips"], id: \.self) { Text($0) }
+                    ForEach(["Overview", "History", "Upcoming", "Trips"], id: \.self) { Text($0) }
                 }.pickerStyle(.segmented)
                 switch selected {
+                case "Overview": VehicleSignalsView(vehicleID: vehicle.id)
                 case "Upcoming": reminders
                 case "Trips": trips
                 default: history
@@ -63,7 +64,7 @@ struct VehicleDetailView: View {
                 }
             }
             .task { await store.refreshDetail(vehicle.id) }
-            .refreshable { await store.refresh(); await store.refreshDetail(vehicle.id) }
+            .refreshable { await store.refresh(); await store.refreshDetail(vehicle.id); await store.refreshSignals(vehicle.id) }
             .sheet(item: $sheet) { item in
                 switch item {
                 case .record: AddRecordView(vehicle: vehicle)

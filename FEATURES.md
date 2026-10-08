@@ -60,6 +60,15 @@ Connection recovery: [v0.1.1](https://github.com/TheOutdoorProgrammer/pitpilot/r
 - [ ] Deliver configurable maintenance and integration notifications without repeated alert noise.
 - [ ] Support accessibility, dynamic text, preferred units, local dates, and time zones.
 
+### Native vehicle measurements
+
+- [ ] Store canonical readings from Pi and Smartcar sources with idempotent ingestion, source time, units and quality.
+- [ ] Preserve date-only snapshots and daily aggregates separately from timestamped samples.
+- [ ] Show available values on the native vehicle dashboard with provenance and stale-state labels.
+- [ ] Open a historical chart from each metric, retaining ranges and gaps when history is downsampled.
+- [ ] Provide an opt-in OpenMetrics endpoint with a separate read-only credential.
+- [ ] Convert complete generated driving and status notes transactionally, preserving structured diagnostics and original evidence before removing visible notes.
+
 ### Raspberry Pi integration
 
 - [ ] Install and enroll a collector through a documented, repeatable process; validate app-guided provisioning.

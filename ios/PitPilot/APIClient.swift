@@ -55,19 +55,25 @@ struct APIClient {
         self.session = session ?? Self.defaultSession
     }
 
-    func request<T: Decodable>(_ route: String, method: String = "GET", body: Data? = nil) async throws -> T {
-        let data = try await send(route, method: method, body: body)
+    func request<T: Decodable>(_ route: String, method: String = "GET", body: Data? = nil, query: [URLQueryItem] = []) async throws -> T {
+        let data = try await send(route, method: method, body: body, query: query)
         do { return try JSONDecoder().decode(T.self, from: data) }
         catch { throw APIError.message("The server returned data this app cannot read. Check that the app and server are up to date.") }
     }
 
-    func send(_ route: String, method: String = "GET", body: Data? = nil) async throws -> Data {
+    func send(_ route: String, method: String = "GET", body: Data? = nil, query: [URLQueryItem] = []) async throws -> Data {
         try Task.checkCancellation()
         let started = Date()
         var statusCode = 0
         var cancelled = false
         var failureKind: String?
-        var request = URLRequest(url: connection.server.appendingPathComponent("api/v1/" + route))
+        var components = URLComponents(url: connection.server.appendingPathComponent("api/v1/" + route), resolvingAgainstBaseURL: false)!
+        if !query.isEmpty {
+            components.queryItems = query
+            // Go query parsing treats a literal plus as a space, including timezone offsets.
+            components.percentEncodedQuery = components.percentEncodedQuery?.replacingOccurrences(of: "+", with: "%2B")
+        }
+        var request = URLRequest(url: components.url!)
         request.httpMethod = method
         request.httpBody = body
         request.timeoutInterval = 20
@@ -131,6 +137,9 @@ struct APIClient {
 
     static func operation(route: String, method: String) -> String? {
         let parts = route.split(separator: "/")
+        if parts.count == 4, parts[0] == "vehicles", parts[2] == "signals", method == "GET" {
+            switch parts[3] { case "latest": return "signals.latest"; case "history": return "signals.history"; default: return nil }
+        }
         if parts.count == 1 && parts[0] == "vehicles" { return method == "GET" ? "vehicles.list" : method == "POST" ? "vehicle.create" : nil }
         if parts.count == 2 {
             let resource: String

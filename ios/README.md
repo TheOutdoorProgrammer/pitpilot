@@ -1,6 +1,6 @@
 # PitPilot for iOS
 
-A native garage journal for a self-hosted PitPilot server. It supports vehicle history, notes, odometer readings, planned work, recurring reminders, and maps of trips already uploaded to the server. It requires iOS 17 or newer.
+A native garage journal for a self-hosted PitPilot server. It supports a vehicle signal dashboard with history charts, maintenance history, notes, odometer readings, planned work, recurring reminders, and maps of trips already uploaded to the server. It requires iOS 17 or newer.
 
 ## Build and test
 
@@ -25,7 +25,7 @@ swift scripts/generate-icon.swift PitPilot/Assets.xcassets/AppIcon.appiconset/Ap
 
 Enter the server's HTTPS origin and API token. URLs containing paths, embedded credentials, queries, and fragments are rejected. HTTP redirects are not followed. The connection is saved in device-only Keychain storage while the device is unlocked.
 
-The app caches loaded vehicles, records, reminders, and trips in a file protected by iOS Data Protection and excluded from backups. Previously loaded information can be read offline; writes require connectivity. Disconnecting deletes the local cache and token, leaving server data intact.
+The app caches loaded vehicles, records, reminders, trips, signal cards, and requested signal history in a file protected by iOS Data Protection and excluded from backups. Previously loaded information can be read offline; writes require connectivity. Disconnecting deletes the local cache and token, leaving server data intact.
 
 Trip maps display recorded samples. Samples over five minutes apart are disconnected, and invalid coordinates are omitted. Map tiles may require internet access. PitPilot does not request location permission or record phone location in this release.
 
@@ -36,9 +36,14 @@ Network operations create W3C trace context for server correlation and emit boun
 - Reminders are visible in the app; push and local notification scheduling are not implemented.
 - Automatic Raspberry Pi and Smartcar ingestion, Pi updates, receipt attachments, and CrewChief AI remain checklist work.
 - Costs use USD, odometers use miles, and fuel quantities use US gallons in this release.
+- Signal charts display the canonical units supplied by the server, including km, km/h, kPa, Celsius, and percent. User-selectable conversions are not implemented.
 - UI tests activate a transport stub only in Debug builds with `--ui-testing`. They use separate test Keychain/cache entries. Release builds contain no fixture transport.
 
 ## Working with imported history
+
+Vehicle Overview shows only metrics with stored values. Tap fuel, manifold pressure, or another metric to choose a reading type and history range. Cards identify source, quality, and the authentic observation time or reporting period. Stale readings retain their value and gain a stale label. Daily or other period summaries remain explicitly historical.
+
+History charts preserve timestamped sample endpoints and bucket minimum/maximum ranges without connecting gaps. Calendar-date snapshots use a separate categorical day chart, with unknown time and timezone clearly labeled; the app does not invent midnight observation times. Expand chart values to inspect the numeric envelopes and actual time bounds. Loaded ranges remain readable offline, and a signal refresh failure does not mark unrelated garage functions offline. Collection details expose available diagnostic codes, missing-data coverage and recording segments without interpreting unknown diagnostic results as successful reads.
 
 History searches titles, notes, tags, and custom fields. Filter by record type and open an entry to read its full notes, custom fields, and source reference. Undated notes remain undated and do not display invented mileage or spending. Odometer entries distinguish initial and final readings and retain whether the reading was measured, estimated, or unspecified.
 

@@ -20,6 +20,7 @@ final class PitPilotUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Weekend truck"].waitForExistence(timeout: 5))
         capture("Garage", app)
         app.staticTexts["Weekend truck"].tap()
+        app.buttons["History"].tap()
         XCTAssertTrue(app.buttons["Log entry"].waitForExistence(timeout: 5))
         app.buttons["Log entry"].tap()
         app.textFields["What did you do?"].tap()
@@ -50,6 +51,7 @@ final class PitPilotUITests: XCTestCase {
         connect(app)
         XCTAssertTrue(app.staticTexts["Synthetic route truck"].waitForExistence(timeout: 5))
         app.staticTexts["Synthetic route truck"].tap()
+        app.buttons["History"].tap()
         XCTAssertTrue(app.staticTexts["Synthetic oil service"].waitForExistence(timeout: 5))
         app.buttons["Trips"].tap()
         XCTAssertTrue(app.staticTexts["Synthetic park loop"].waitForExistence(timeout: 5))
@@ -66,6 +68,7 @@ final class PitPilotUITests: XCTestCase {
         XCTAssertFalse(app.navigationBars.buttons["Add vehicle"].isEnabled)
         capture("Offline garage cache", app)
         app.staticTexts["Synthetic route truck"].tap()
+        app.buttons["History"].tap()
         XCTAssertTrue(app.staticTexts["Synthetic oil service"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.buttons["Log entry"].isEnabled)
         XCTAssertFalse(app.buttons["Add to vehicle"].isEnabled)
@@ -92,6 +95,7 @@ final class PitPilotUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Source record: 1"].exists)
         capture("Imported vehicle metadata", app)
         information.tap()
+        app.buttons["History"].tap()
         let search = app.textFields["historySearch"]
         XCTAssertTrue(search.waitForExistence(timeout: 5))
         search.tap()
@@ -123,6 +127,7 @@ final class PitPilotUITests: XCTestCase {
         app.launch()
         connect(app)
         app.staticTexts["Synthetic route truck"].tap()
+        app.buttons["History"].tap()
         if !app.staticTexts["Synthetic daily reading"].isHittable { app.swipeUp() }
         XCTAssertTrue(app.staticTexts["Synthetic daily reading"].waitForExistence(timeout: 5))
         app.staticTexts["Synthetic daily reading"].tap()
@@ -158,6 +163,72 @@ final class PitPilotUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["At 130,100 mi"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["Complete Synthetic recurring oil"].exists)
         capture("Recurring reminder advanced once", app)
+    }
+
+    func testNativeSignalsAndFaithfulHistory() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-testing", "--ui-testing-signals"]
+        app.launch()
+        connect(app)
+        app.staticTexts["Synthetic route truck"].tap()
+        let fuel = app.buttons["signal-fuel_level_pct"]
+        XCTAssertTrue(fuel.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["signal-rpm"].exists)
+        if !fuel.isHittable { app.swipeUp() }
+        capture("Signals overview with actual values", app)
+        fuel.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["calendarSignalChart"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Calendar-date snapshots"].exists)
+        XCTAssertFalse(app.descendants(matching: .any)["signalHistoryChart"].exists)
+        capture("Fuel calendar-day chart", app)
+        XCUIDevice.shared.orientation = .landscapeLeft
+        capture("Fuel chart landscape", app)
+        XCUIDevice.shared.orientation = .portrait
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        let manifold = app.buttons["signal-manifold_kpa"]
+        for _ in 0..<4 where !manifold.isHittable { app.swipeUp() }
+        XCTAssertTrue(manifold.waitForExistence(timeout: 5))
+        XCTAssertTrue(manifold.label.contains("Stale reading"))
+        manifold.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["signalHistoryChart"].waitForExistence(timeout: 5))
+        capture("Manifold timestamped history", app)
+        app.buttons["signalStatistic"].tap()
+        app.buttons["Period maximum"].tap()
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Each mark covers")).firstMatch.waitForExistence(timeout: 5))
+        capture("Manifold aggregate history", app)
+        app.terminate()
+        app.launchArguments = ["--ui-testing", "--ui-testing-signals", "--ui-testing-preserve-cache", "--ui-testing-offline"]
+        app.launch()
+        XCTAssertTrue(app.staticTexts["Saved on this phone"].waitForExistence(timeout: 5))
+        app.staticTexts["Synthetic route truck"].tap()
+        for _ in 0..<4 where !app.buttons["signal-fuel_level_pct"].isHittable { app.swipeUp() }
+        app.buttons["signal-fuel_level_pct"].tap()
+        XCTAssertTrue(app.staticTexts["Saved history on this phone"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.descendants(matching: .any)["calendarSignalChart"].exists)
+        capture("Offline saved fuel history", app)
+    }
+
+    func testSignalHistoryErrorAndEmptyStates() {
+        for scenario in ["--ui-testing-history-error", "--ui-testing-history-empty"] {
+            let app = XCUIApplication()
+            app.launchArguments = ["--ui-testing", "--ui-testing-signals", scenario]
+            app.launch()
+            connect(app)
+            app.staticTexts["Synthetic route truck"].tap()
+            let fuel = app.buttons["signal-fuel_level_pct"]
+            XCTAssertTrue(fuel.waitForExistence(timeout: 5))
+            if !fuel.isHittable { app.swipeUp() }
+            fuel.tap()
+            if scenario == "--ui-testing-history-error" {
+                XCTAssertTrue(app.buttons["Retry history"].waitForExistence(timeout: 5))
+                XCTAssertFalse(app.staticTexts["Saved on this phone"].exists)
+                capture("Signal history local error", app)
+            } else {
+                XCTAssertTrue(app.staticTexts["No readings in this range"].waitForExistence(timeout: 5))
+                capture("Signal history empty range", app)
+            }
+            app.terminate()
+        }
     }
 
     private func connect(_ app: XCUIApplication) {

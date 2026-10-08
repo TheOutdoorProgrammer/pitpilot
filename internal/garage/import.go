@@ -217,6 +217,20 @@ func (s *Store) Import(ctx context.Context, batch ImportBatch, applyToken string
 			continue
 		}
 		if errors.Is(e, sql.ErrNoRows) {
+			var convertedHash string
+			convertedErr := tx.QueryRowContext(ctx, "SELECT original_hash FROM converted_signal_notes WHERE note_id=?", v.ID).Scan(&convertedHash)
+			if convertedErr != nil && !errors.Is(convertedErr, sql.ErrNoRows) {
+				return report, convertedErr
+			}
+			if convertedErr == nil && convertedHash == oldTarget {
+				h.Write([]byte("converted:" + convertedHash))
+				if sourceHash == oldSource {
+					report.Skipped++
+				} else {
+					report.conflict(v, "converted-summary-source-changed")
+				}
+				continue
+			}
 			report.conflict(v, "target-deleted")
 			continue
 		}

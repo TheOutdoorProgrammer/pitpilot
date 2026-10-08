@@ -64,7 +64,7 @@ func TestRejectsFutureSchema(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = db.Exec("PRAGMA user_version=3"); err != nil {
+	if _, err = db.Exec("PRAGMA user_version=4"); err != nil {
 		t.Fatal(err)
 	}
 	db.Close()

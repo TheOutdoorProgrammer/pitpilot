@@ -48,7 +48,7 @@ func Open(filename string) (*Store, error) {
 		db.Close()
 		return nil, err
 	}
-	if version > 2 {
+	if version > 3 {
 		db.Close()
 		return nil, errors.New("database schema is newer than this server")
 	}
@@ -77,6 +77,14 @@ func Open(filename string) (*Store, error) {
 	// Early schema 2 rehearsal databases contained only the source mapping table.
 	// Settings are pinned when an import is first applied.
 	if _, err = db.Exec(`CREATE TABLE IF NOT EXISTS import_settings(source TEXT PRIMARY KEY, settings TEXT NOT NULL CHECK(json_valid(settings)));`); err != nil {
+		db.Close()
+		return nil, err
+	}
+	if err = initializeSignals(db); err != nil {
+		db.Close()
+		return nil, err
+	}
+	if err = initializeSignalConversions(db); err != nil {
 		db.Close()
 		return nil, err
 	}
@@ -256,14 +264,18 @@ func affected(result sql.Result, err error) error {
 }
 
 type Export struct {
-	SchemaVersion  int               `json:"schemaVersion"`
-	ExportedAt     time.Time         `json:"exportedAt"`
-	Vehicles       []json.RawMessage `json:"vehicles"`
-	Records        []json.RawMessage `json:"records"`
-	Reminders      []json.RawMessage `json:"reminders"`
-	Trips          []json.RawMessage `json:"trips"`
-	ImportSources  []ImportedSource  `json:"importSources"`
-	ImportSettings []ImportSettings  `json:"importSettings"`
+	SchemaVersion        int                   `json:"schemaVersion"`
+	ExportedAt           time.Time             `json:"exportedAt"`
+	Vehicles             []json.RawMessage     `json:"vehicles"`
+	Records              []json.RawMessage     `json:"records"`
+	Reminders            []json.RawMessage     `json:"reminders"`
+	Trips                []json.RawMessage     `json:"trips"`
+	ImportSources        []ImportedSource      `json:"importSources"`
+	ImportSettings       []ImportSettings      `json:"importSettings"`
+	Signals              []StoredSignal        `json:"signals"`
+	SignalContexts       []StoredSignalContext `json:"signalContexts"`
+	SignalBatches        []StoredSignalBatch   `json:"signalBatches"`
+	ConvertedSignalNotes []ConvertedSignalNote `json:"convertedSignalNotes"`
 }
 
 type ImportSettings struct {
@@ -285,7 +297,7 @@ type ImportedSource struct {
 func (s *Store) Export(ctx context.Context) (out Export, err error) {
 	ctx, done := operation(ctx, "db.export")
 	defer func() { done(err) }()
-	out = Export{SchemaVersion: 2, ExportedAt: time.Now().UTC(), Vehicles: []json.RawMessage{}, Records: []json.RawMessage{}, Reminders: []json.RawMessage{}, Trips: []json.RawMessage{}, ImportSources: []ImportedSource{}, ImportSettings: []ImportSettings{}}
+	out = Export{SchemaVersion: 3, ExportedAt: time.Now().UTC(), Vehicles: []json.RawMessage{}, Records: []json.RawMessage{}, Reminders: []json.RawMessage{}, Trips: []json.RawMessage{}, ImportSources: []ImportedSource{}, ImportSettings: []ImportSettings{}}
 	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
 		return out, err
@@ -357,6 +369,12 @@ func (s *Store) Export(ctx context.Context) (out Export, err error) {
 	err = settings.Err()
 	settings.Close()
 	if err != nil {
+		return out, err
+	}
+	if err = exportSignals(ctx, tx, &out); err != nil {
+		return out, err
+	}
+	if out.ConvertedSignalNotes, err = exportSignalConversions(ctx, tx); err != nil {
 		return out, err
 	}
 	return out, tx.Commit()

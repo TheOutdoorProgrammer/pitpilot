@@ -20,6 +20,13 @@ var version = "dev"
 var commit = "unknown"
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "convert-summary-metrics" {
+		if err := convertSummaries(os.Args[2:], os.Stdout); err != nil {
+			fmt.Fprintln(os.Stderr, "pitpilot summary conversion:", err)
+			os.Exit(1)
+		}
+		return
+	}
 	if len(os.Args) > 1 && os.Args[1] == "backup" {
 		if err := backup(os.Args[2:], os.Stdout); err != nil {
 			fmt.Fprintln(os.Stderr, "pitpilot backup:", err)
@@ -35,7 +42,7 @@ func main() {
 		return
 	}
 	if len(os.Args) == 2 && (os.Args[1] == "--help" || os.Args[1] == "help") {
-		fmt.Println("PitPilot vehicle journal.\n\nCommands:\n  version\n  migrate-lubelogger --help\n  backup --help\n\nWith no command, starts the API server configured by PITPILOT_* environment variables.")
+		fmt.Println("PitPilot vehicle journal.\n\nCommands:\n  version\n  migrate-lubelogger --help\n  convert-summary-metrics --help\n  backup --help\n\nWith no command, starts the API server configured by PITPILOT_* environment variables.")
 		return
 	}
 	if len(os.Args) == 2 && os.Args[1] == "version" {
@@ -83,7 +90,18 @@ func run() error {
 		return errors.New("database initialization failed")
 	}
 	defer store.Close()
-	handler, err := api.New(store, token, logger)
+	metricsToken := ""
+	if filename := os.Getenv("PITPILOT_METRICS_TOKEN_FILE"); filename != "" {
+		data, readErr := os.ReadFile(filename)
+		if readErr != nil {
+			return errors.New("cannot read metrics token file")
+		}
+		metricsToken = strings.TrimSpace(string(data))
+		if len(metricsToken) < 32 {
+			return errors.New("metrics token file must contain at least 32 random characters")
+		}
+	}
+	handler, err := api.NewWithOptions(store, token, logger, api.Options{MetricsToken: metricsToken})
 	if err != nil {
 		return err
 	}

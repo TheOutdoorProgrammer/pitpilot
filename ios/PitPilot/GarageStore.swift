@@ -41,6 +41,8 @@ struct GarageCache: Codable {
     var details: [String: VehicleDetail] = [:]
     var updatedAt: Date?
     var connectionDigest: String?
+    var signals: [String: LatestSignals]?
+    var signalHistory: [String: SignalHistory]?
 }
 
 @MainActor
@@ -50,11 +52,14 @@ final class GarageStore: ObservableObject {
     @Published private(set) var refreshing = false
     @Published private(set) var offline = false
     @Published var error: String?
+    @Published private(set) var signalErrors: [String: String] = [:]
+    @Published private(set) var signalsRefreshing: Set<String> = []
     private let secure = SecureConnection()
     private let cacheURL: URL
     private let session: URLSession?
     private var refreshTask: Task<[Vehicle], Error>?
     private var refreshID: UUID?
+    private var signalRefreshIDs: [String: UUID] = [:]
 
     init() {
         session = nil
@@ -92,6 +97,7 @@ final class GarageStore: ObservableObject {
 
     var vehicles: [Vehicle] { cache.vehicles }
     func detail(_ id: String) -> VehicleDetail { cache.details[id] ?? VehicleDetail() }
+    func signals(_ id: String) -> LatestSignals? { cache.signals?[id] }
     private var client: APIClient? { connection.map { APIClient(connection: $0, session: session) } }
     private func isCurrent(_ client: APIClient) -> Bool {
         connection?.server == client.connection.server && connection?.token == client.connection.token
@@ -116,6 +122,9 @@ final class GarageStore: ObservableObject {
         cache = GarageCache()
         offline = false
         error = nil
+        signalErrors = [:]
+        signalRefreshIDs = [:]
+        signalsRefreshing = []
     }
 
     func refresh() async {
@@ -143,6 +152,8 @@ final class GarageStore: ObservableObject {
             cache.vehicles = vehicles
             let ids = Set(cache.vehicles.map(\.id))
             cache.details = cache.details.filter { ids.contains($0.key) }
+            cache.signals = cache.signals?.filter { ids.contains($0.key) }
+            cache.signalHistory = cache.signalHistory?.filter { key, _ in ids.contains(String(key.split(separator: "/", maxSplits: 1).first ?? "")) }
             cache.updatedAt = Date()
             offline = false
             error = nil
@@ -171,6 +182,57 @@ final class GarageStore: ObservableObject {
         } catch { if isCurrent(client) { offline = true; self.error = error.localizedDescription } }
     }
 
+    func refreshSignals(_ id: String) async {
+        guard !Task.isCancelled, let client else { return }
+        let requestID = UUID()
+        signalRefreshIDs[id] = requestID
+        signalsRefreshing.insert(id)
+        defer {
+            if signalRefreshIDs[id] == requestID {
+                signalRefreshIDs.removeValue(forKey: id)
+                signalsRefreshing.remove(id)
+            }
+        }
+        do {
+            let response: LatestSignals = try await client.request("vehicles/\(id)/signals/latest")
+            try Task.checkCancellation()
+            guard isCurrent(client), signalRefreshIDs[id] == requestID else { return }
+            if cache.signals == nil { cache.signals = [:] }
+            cache.signals?[id] = response
+            signalErrors.removeValue(forKey: id)
+            persist()
+        } catch is CancellationError {
+        } catch {
+            if isCurrent(client), signalRefreshIDs[id] == requestID { signalErrors[id] = error.localizedDescription }
+        }
+    }
+
+    func cachedSignalHistory(vehicleID: String, metric: String, statistic: String, days: Int) -> SignalHistory? {
+        cache.signalHistory?[historyKey(vehicleID, metric, statistic, days)]
+    }
+
+    func signalHistory(vehicleID: String, metric: String, statistic: String, days: Int) async throws -> SignalHistory {
+        guard let client else { throw APIError.message("Connect to your server first.") }
+        let end = Date()
+        let start = end.addingTimeInterval(-Double(days) * 86400)
+        let formatter = ISO8601DateFormatter()
+        let response: SignalHistory = try await client.request("vehicles/\(vehicleID)/signals/history", query: [
+            URLQueryItem(name: "metric", value: metric), URLQueryItem(name: "statistic", value: statistic),
+            URLQueryItem(name: "from", value: formatter.string(from: start)), URLQueryItem(name: "to", value: formatter.string(from: end)),
+            URLQueryItem(name: "maxPoints", value: "120")
+        ])
+        try Task.checkCancellation()
+        guard isCurrent(client) else { throw CancellationError() }
+        if cache.signalHistory == nil { cache.signalHistory = [:] }
+        cache.signalHistory?[historyKey(vehicleID, metric, statistic, days)] = response
+        persist()
+        return response
+    }
+
+    private func historyKey(_ vehicle: String, _ metric: String, _ statistic: String, _ days: Int) -> String {
+        [vehicle, metric, statistic, String(days)].joined(separator: "/")
+    }
+
     func createVehicle(_ values: [String: Any]) async throws {
         guard let client else { throw APIError.message("Connect to your server first.") }
         let vehicle: Vehicle = try await client.request("vehicles", method: "POST", body: APIClient.body(values))
@@ -193,6 +255,9 @@ final class GarageStore: ObservableObject {
         guard isCurrent(client) else { return }
         cache.vehicles.removeAll { $0.id == id }
         cache.details.removeValue(forKey: id)
+        cache.signals?.removeValue(forKey: id)
+        cache.signalHistory = cache.signalHistory?.filter { !$0.key.hasPrefix(id + "/") }
+        signalErrors.removeValue(forKey: id)
         persist()
     }
 

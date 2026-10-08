@@ -5,8 +5,9 @@ import Foundation
 final class UITestProtocol: URLProtocol {
     private static let populated = ProcessInfo.processInfo.arguments.contains("--ui-testing-populated")
     private static let migration = ProcessInfo.processInfo.arguments.contains("--ui-testing-migration")
+    private static let signals = ProcessInfo.processInfo.arguments.contains("--ui-testing-signals")
     static var vehicles: [[String: Any]] = {
-        guard populated || migration else { return [] }
+        guard populated || migration || signals else { return [] }
         var vehicle: [String: Any] = ["id": "test-vehicle", "name": "Synthetic route truck", "make": "", "model": "", "year": 2002, "odometerMiles": 120000, "createdAt": "2026-01-01T00:00:00Z"]
         if migration {
             vehicle["vin"] = "SYNTHETIC-VIN"
@@ -64,6 +65,11 @@ final class UITestProtocol: URLProtocol {
         }
         if request.value(forHTTPHeaderField: "Authorization") != "Bearer test-token" { code = 401; response = ["error": "Unauthorized"] }
         else if route == "/api/v1/client-events" { code = 204 }
+        else if route.hasSuffix("/signals/latest") { response = Self.signalLatest }
+        else if route.hasSuffix("/signals/history") {
+            if ProcessInfo.processInfo.arguments.contains("--ui-testing-history-error") { code = 503; response = ["error": "Synthetic unavailable"] }
+            else { response = Self.signalHistory(request.url!) }
+        }
         else if route == "/api/v1/vehicles" {
             if request.httpMethod == "POST" {
                 body["id"] = "test-vehicle"; body["createdAt"] = "2026-01-01T00:00:00Z"
@@ -101,5 +107,41 @@ final class UITestProtocol: URLProtocol {
         client?.urlProtocolDidFinishLoading(self)
     }
     override func stopLoading() {}
+
+    private static func signalTime(_ offset: TimeInterval) -> String { ISO8601DateFormatter().string(from: Date().addingTimeInterval(offset)) }
+    private static var signalLatest: [String: Any] {
+        guard signals else { return ["asOf": signalTime(0), "definitions": [], "series": [], "contexts": []] }
+        return ["asOf": signalTime(0), "definitions": [
+            ["metric": "fuel_level_pct", "label": "Fuel level", "unit": "%", "staleAfterSeconds": 900],
+            ["metric": "manifold_kpa", "label": "Manifold pressure", "unit": "kPa", "staleAfterSeconds": 900],
+            ["metric": "rpm", "label": "Engine speed", "unit": "rpm", "staleAfterSeconds": 900]
+        ], "series": [
+            ["metric": "fuel_level_pct", "unit": "%", "source": "smartcar", "statistic": "snapshot", "quality": "measured", "stale": true,
+             "latest": ["key": "synthetic-fuel", "metric": "fuel_level_pct", "unit": "%", "statistic": "snapshot", "quality": "measured", "value": 55, "calendarDate": "2026-10-08", "timezone": "unknown"]],
+            ["metric": "manifold_kpa", "unit": "kPa", "source": "pi", "statistic": "sample", "quality": "measured", "stale": true,
+             "latest": ["key": "synthetic-manifold", "metric": "manifold_kpa", "unit": "kPa", "statistic": "sample", "quality": "measured", "value": 42, "observedAt": signalTime(-3600)]],
+            ["metric": "manifold_kpa", "unit": "kPa", "source": "pi", "statistic": "max", "quality": "measured", "stale": true,
+             "latest": ["key": "synthetic-manifold-max", "metric": "manifold_kpa", "unit": "kPa", "statistic": "max", "quality": "measured", "value": 84, "periodStart": signalTime(-172800), "periodEnd": signalTime(-86400)]]
+        ], "contexts": []]
+    }
+
+    private static func signalHistory(_ url: URL) -> [String: Any] {
+        let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+        func value(_ name: String) -> String { query.first { $0.name == name }?.value ?? "" }
+        let metric = value("metric")
+        let statistic = value("statistic")
+        var response: [String: Any] = ["metric": metric, "unit": metric == "fuel_level_pct" ? "%" : "kPa", "from": value("from"), "to": value("to"), "maxPoints": 120, "series": []]
+        if ProcessInfo.processInfo.arguments.contains("--ui-testing-history-empty") { return response }
+        let point: [String: Any]
+        if metric == "fuel_level_pct" {
+            point = ["calendarDate": "2026-10-08", "timezone": "unknown", "minimum": 55, "maximum": 55, "mean": 55, "first": 55, "last": 55, "count": 1]
+        } else if statistic == "sample" {
+            point = ["bucketStart": signalTime(-7200), "bucketEnd": signalTime(-3600), "windowStart": signalTime(-5400), "windowEnd": signalTime(-3600), "minimum": 32, "maximum": 42, "mean": 37, "first": 32, "last": 42, "count": 2, "firstObservedAt": signalTime(-5400), "lastObservedAt": signalTime(-3600)]
+        } else {
+            point = ["bucketStart": signalTime(-172800), "bucketEnd": signalTime(-86400), "windowStart": signalTime(-172800), "windowEnd": signalTime(-86400), "minimum": 84, "maximum": 84, "mean": 84, "first": 84, "last": 84, "count": 1]
+        }
+        response["series"] = [["source": metric == "fuel_level_pct" ? "smartcar" : "pi", "quality": "measured", "statistic": statistic, "points": [point]]]
+        return response
+    }
 }
 #endif

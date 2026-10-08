@@ -7,6 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		026C6E63B089458581FF16AC /* Signals.swift in Sources */ = {isa = PBXBuildFile; fileRef = 754E686B127340B0933A898B /* Signals.swift */; };
+		1248627210174DAC85E834A4 /* SignalViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5CF7812815C1458C8D373010 /* SignalViews.swift */; };
 		0EB6D1D0D15C9992C5EB4FAD /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90467EB56E75AFFB9D5FAEC4 /* Models.swift */; };
 		169C94B703E420593876707D /* PitPilotTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F17A4490A962341649E3CED /* PitPilotTests.swift */; };
 		273C1784B8EE8260A82A6A17 /* GarageStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA357CF1537345A4BBE33CE5 /* GarageStore.swift */; };
@@ -37,6 +39,8 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		754E686B127340B0933A898B /* Signals.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Signals.swift; sourceTree = "<group>"; };
+		5CF7812815C1458C8D373010 /* SignalViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SignalViews.swift; sourceTree = "<group>"; };
 		0AD2F237C5B41C4009BB7A4E /* PitPilotApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PitPilotApp.swift; sourceTree = "<group>"; };
 		5A4A4A4DE5AAAB78C611A282 /* EntryForms.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EntryForms.swift; sourceTree = "<group>"; };
 		5D81E740C8B35FFC2B726366 /* PitPilot.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = PitPilot.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -62,6 +66,8 @@
 				BA357CF1537345A4BBE33CE5 /* GarageStore.swift */,
 				90467EB56E75AFFB9D5FAEC4 /* Models.swift */,
 				0AD2F237C5B41C4009BB7A4E /* PitPilotApp.swift */,
+				754E686B127340B0933A898B /* Signals.swift */,
+				5CF7812815C1458C8D373010 /* SignalViews.swift */,
 				BA3435AE72CFBDB3956D9B0F /* UITestProtocol.swift */,
 				E57DDC368076E0FC563D811A /* VehicleDetailView.swift */,
 			);
@@ -220,6 +226,8 @@
 				273C1784B8EE8260A82A6A17 /* GarageStore.swift in Sources */,
 				0EB6D1D0D15C9992C5EB4FAD /* Models.swift in Sources */,
 				B5F6BDA671ED726B3914858E /* PitPilotApp.swift in Sources */,
+				026C6E63B089458581FF16AC /* Signals.swift in Sources */,
+				1248627210174DAC85E834A4 /* SignalViews.swift in Sources */,
 				3E7CA45D5E39F90462B1F2A8 /* UITestProtocol.swift in Sources */,
 				F0D094CAE67ABBA483723C10 /* VehicleDetailView.swift in Sources */,
 			);
@@ -361,7 +369,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				MARKETING_VERSION = 0.1.1;
+				MARKETING_VERSION = 0.3.0;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
@@ -474,7 +482,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				MARKETING_VERSION = 0.1.1;
+				MARKETING_VERSION = 0.3.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";

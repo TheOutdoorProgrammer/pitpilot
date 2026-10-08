@@ -15,6 +15,7 @@ var clientOperations = map[string]bool{
 	"records.list": true, "record.create": true, "record.update": true, "record.delete": true,
 	"reminders.list": true, "reminder.create": true, "reminder.update": true, "reminder.delete": true,
 	"trips.list": true, "trip.create": true, "trip.delete": true, "export.get": true,
+	"signals.latest": true, "signals.history": true, "signals.catalog": true,
 }
 
 var clientFailureKinds = map[string]bool{

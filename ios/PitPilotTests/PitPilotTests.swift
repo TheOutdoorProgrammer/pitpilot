@@ -2,6 +2,83 @@ import XCTest
 @testable import PitPilot
 
 final class PitPilotTests: XCTestCase {
+    private var signalFixture: Data {
+        Data(#"{"asOf":"2026-10-08T12:00:00Z","definitions":[{"metric":"fuel_level_pct","label":"Fuel level","unit":"%","staleAfterSeconds":900},{"metric":"rpm","label":"Engine speed","unit":"rpm","staleAfterSeconds":900}],"series":[{"metric":"fuel_level_pct","unit":"%","source":"smartcar","statistic":"snapshot","quality":"measured","stale":true,"latest":{"key":"synthetic","metric":"fuel_level_pct","unit":"%","statistic":"snapshot","quality":"measured","value":0,"calendarDate":"2026-10-08","timezone":"unknown"}}]}"#.utf8)
+    }
+
+    func testSignalSnapshotsKeepUnknownTimeAndActualZero() throws {
+        let signals = try JSONDecoder().decode(LatestSignals.self, from: signalFixture)
+        XCTAssertEqual(signals.metrics, ["fuel_level_pct"])
+        let reading = try XCTUnwrap(signals.series.first)
+        XCTAssertNil(reading.latest.referenceDate)
+        XCTAssertNil(reading.latest.observedAt)
+        XCTAssertEqual(reading.latest.value, 0)
+        XCTAssertEqual(SignalFormat.value(reading.latest.value, unit: reading.unit), "0 %")
+        XCTAssertTrue(reading.latest.timeLabel.contains("Time and timezone unknown"))
+        XCTAssertTrue(reading.isStale(at: Date(), definition: signals.definition("fuel_level_pct")))
+        let history = try JSONDecoder().decode(SignalHistory.self, from: Data(#"{"metric":"fuel_level_pct","unit":"%","from":"2026-10-01T00:00:00Z","to":"2026-10-09T00:00:00Z","maxPoints":120,"series":[{"source":"smartcar","quality":"measured","statistic":"snapshot","points":[{"calendarDate":"2026-10-08","timezone":"unknown","minimum":0,"maximum":0,"mean":0,"first":0,"last":0,"count":1}]}]}"#.utf8))
+        let point = try XCTUnwrap(history.series.first?.points.first)
+        XCTAssertNil(point.windowStart)
+        XCTAssertNil(point.firstObservedAt)
+        XCTAssertEqual(point.calendarDate, "2026-10-08")
+    }
+
+    func testSignalStalenessAdvancesWhenCachedWithoutErasingValue() throws {
+        let observed = try XCTUnwrap(SignalFormat.date("2026-10-08T12:00:00.125Z"))
+        let definition = SignalDefinition(metric: "rpm", label: "Engine speed", unit: "rpm", staleAfterSeconds: 900)
+        let reading = LatestSignal(metric: "rpm", unit: "rpm", source: "pi", statistic: "sample", quality: "measured",
+            latest: SignalObservation(key: "synthetic", metric: "rpm", unit: "rpm", statistic: "sample", quality: "measured", value: 0, observedAt: "2026-10-08T12:00:00.125Z"), stale: false)
+        XCTAssertFalse(reading.isStale(at: observed.addingTimeInterval(30), definition: definition))
+        XCTAssertTrue(reading.isStale(at: observed.addingTimeInterval(901), definition: definition))
+        XCTAssertEqual(reading.latest.value, 0)
+        var cache = GarageCache()
+        cache.signals = ["synthetic-vehicle": LatestSignals(asOf: "2026-10-08T12:00:01Z", definitions: [definition], series: [reading])]
+        let restored = try JSONDecoder().decode(GarageCache.self, from: JSONEncoder().encode(cache))
+        XCTAssertEqual(restored.signals?["synthetic-vehicle"]?.series.first?.latest.value, 0)
+        let old = try JSONDecoder().decode(GarageCache.self, from: Data(#"{"vehicles":[],"details":{}}"#.utf8))
+        XCTAssertNil(old.signals)
+        XCTAssertNil(old.signalHistory)
+    }
+
+    @MainActor
+    func testSignalRefreshFailureAndCancellationKeepGarageOnlineAndCached() async throws {
+        let fixture = HTTPFixture()
+        defer { fixture.close() }
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        var cache = GarageCache()
+        cache.signals = ["synthetic": try JSONDecoder().decode(LatestSignals.self, from: signalFixture)]
+        let store = GarageStore(connection: fixture.connection, cache: cache, cacheURL: directory.appendingPathComponent("garage.json"), session: fixture.session)
+        fixture.configure(.failure(.timedOut))
+        await store.refreshSignals("synthetic")
+        XCTAssertFalse(store.offline)
+        XCTAssertNil(store.error)
+        XCTAssertNotNil(store.signalErrors["synthetic"])
+        XCTAssertEqual(store.signals("synthetic")?.series.first?.latest.value, 0)
+        fixture.configure(.failure(.cancelled))
+        await store.refreshSignals("synthetic")
+        XCTAssertFalse(store.offline)
+        XCTAssertTrue(store.signalsRefreshing.isEmpty)
+        fixture.configure(.json(signalFixture))
+        await store.refreshSignals("synthetic")
+        XCTAssertNil(store.signalErrors["synthetic"])
+        XCTAssertEqual(store.signals("synthetic")?.series.count, 1)
+    }
+
+    func testSignalHistoryUsesEncodedQueryAndBoundedTelemetryOperation() async throws {
+        let fixture = HTTPFixture()
+        defer { fixture.close() }
+        let _: [Vehicle] = try await fixture.client.request("vehicles/private-id/signals/history", query: [URLQueryItem(name: "metric", value: "fuel_level_pct"), URLQueryItem(name: "from", value: "2026-10-08T00:00:00+01:00")])
+        let url = try XCTUnwrap(fixture.requests.first)
+        XCTAssertEqual(url.path, "/api/v1/vehicles/private-id/signals/history")
+        let query = try XCTUnwrap(URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems)
+        XCTAssertEqual(query.first { $0.name == "from" }?.value, "2026-10-08T00:00:00+01:00")
+        XCTAssertTrue(url.absoluteString.contains("%2B01:00"))
+        XCTAssertEqual(APIClient.operation(route: "vehicles/private-id/signals/history", method: "GET"), "signals.history")
+        XCTAssertEqual(APIClient.operation(route: "vehicles/private-id/signals/latest", method: "GET"), "signals.latest")
+        XCTAssertNil(APIClient.operation(route: "vehicles/private-id/signals/arbitrary", method: "GET"))
+    }
+
     func testConnectionRejectsUnsafeURLsAndMissingToken() throws {
         for url in ["http://example.com", "https://name:secret@example.com", "https://example.com/path", "https://example.com?token=secret", "https://example.com#fragment", "not a url"] {
             XCTAssertThrowsError(try Connection.validated(server: url, token: "test"), url)
@@ -304,7 +381,7 @@ final class PitPilotTests: XCTestCase {
 }
 
 private final class HTTPFixture {
-    enum Response { case hold, success, failure(URLError.Code) }
+    enum Response { case hold, success, failure(URLError.Code), json(Data) }
     let connection: Connection
     let session: URLSession
     var client: APIClient { APIClient(connection: connection, session: session) }
@@ -314,7 +391,9 @@ private final class HTTPFixture {
     private var reported: XCTestExpectation?
     private var stopped: XCTestExpectation?
     private var recordedEvents: [[String: Any]] = []
+    private var recordedRequests: [URL] = []
     var events: [[String: Any]] { lock.lock(); defer { lock.unlock() }; return recordedEvents }
+    var requests: [URL] { lock.lock(); defer { lock.unlock() }; return recordedRequests }
 
     init() {
         connection = Connection(server: URL(string: "https://\(UUID().uuidString.lowercased()).example.test")!, token: "synthetic-test-token")
@@ -368,16 +447,18 @@ private final class HTTPFixture {
             return
         }
         started?.fulfill()
+        if let url = transport.request.url { lock.lock(); recordedRequests.append(url); lock.unlock() }
         switch response {
         case .hold: break
         case .success: respond(transport, status: 200)
+        case .json(let data): respond(transport, status: 200, data: data)
         case .failure(let code): transport.client?.urlProtocol(transport, didFailWithError: URLError(code))
         }
     }
 
-    private func respond(_ transport: URLProtocol, status: Int) {
+    private func respond(_ transport: URLProtocol, status: Int, data: Data = Data("[]".utf8)) {
         transport.client?.urlProtocol(transport, didReceive: HTTPURLResponse(url: transport.request.url!, statusCode: status, httpVersion: nil, headerFields: nil)!, cacheStoragePolicy: .notAllowed)
-        transport.client?.urlProtocol(transport, didLoad: Data("[]".utf8))
+        transport.client?.urlProtocol(transport, didLoad: data)
         transport.client?.urlProtocolDidFinishLoading(transport)
     }
 }

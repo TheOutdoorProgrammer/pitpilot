@@ -26,6 +26,8 @@ Automatic vehicle ingestion, receipt attachments, push notifications, and CrewCh
 
 Every reading should identify its source and when it was observed. Estimated mileage, inferred fuel-ups, and suggested maintenance must remain distinguishable from measured data and confirmed records.
 
+The [vehicle measurements guide](docs/vehicle-signals.md) documents native signal ingestion, dashboard history, private OpenMetrics scraping and conversion of generated summaries. The ingestion contract is shared by Pi and Smartcar adapters; built-in setup and authorization flows remain unfinished.
+
 ## CrewChief AI
 
 CrewChief is an optional paid AI offering planned for PitPilot. Proposed capabilities include answering questions about vehicle history, extracting draft records from receipts, explaining diagnostic observations, and suggesting maintenance to review.
