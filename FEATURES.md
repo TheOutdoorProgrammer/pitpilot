@@ -10,13 +10,16 @@ These smaller milestones track the first deployment without claiming full comple
 - [x] Record service, repairs, upgrades, fuel, expenses, and notes with validated dates, mileage, and integer costs.
 - [x] Create date or mileage reminders and mark them complete.
 - [x] Store recorded trips with validated GPS coordinates and provide a consistent household JSON export.
-- [ ] Verify the native garage, records, reminders, trip maps, secure connection, and offline reading flows.
+- [x] Verify secure native connection, vehicle creation, service entry, history, and the trips empty state on standard and compact iPhone simulators.
+- [ ] Verify populated native trip maps, reminder completion, and cached reading during a server outage.
 - [ ] Publish signed iOS builds through Quill and Fledge.
 - [ ] Build backend binaries with GoReleaser inside Quill and copy them into the runtime container.
 - [ ] Deploy the image through Flux and verify authenticated behavior and persistence after restart.
 - [ ] Verify backend and relayed native request observations in Grafana without personal data in telemetry.
 
 Backend validation: `go test -race ./...`, `go vet ./...`, and `govulncheck`; the end-to-end API tests cover record lifecycle, export, authentication, validation, persistence, concurrent edits, and the client telemetry allowlist. These checks gate publication in the [Release workflow](.github/workflows/release.yml).
+
+Native validation: six [unit tests](ios/PitPilotTests/PitPilotTests.swift) and the [garage UI journey](ios/PitPilotUITests/PitPilotUITests.swift) pass on iPhone 17 and iPhone SE simulators. Unit coverage includes route gaps, coordinate validation, and cache identity; that does not yet establish the unchecked UI flows above. Both GitHub iOS jobs use the repository's self-hosted runner.
 
 ## Product decisions
 
