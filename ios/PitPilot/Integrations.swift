@@ -172,11 +172,13 @@ final class VehicleIntegrations: ObservableObject {
         do {
             async let devices: [VehicleDevice] = client.request("vehicles/\(vehicleID)/devices")
             async let configuration: SmartcarConfiguration = client.request("integrations/smartcar")
-            async let status: SmartcarStatus = client.request("vehicles/\(vehicleID)/smartcar")
-            let next = try await (devices, configuration, status)
+            let next = try await (devices, configuration)
+            let status: SmartcarStatus?
+            if next.1.configured { status = try await client.request("vehicles/\(vehicleID)/smartcar") }
+            else { status = nil }
             try Task.checkCancellation()
             guard refreshID == id else { return }
-            self.devices = next.0; self.configuration = next.1; smartcar = next.2
+            self.devices = next.0; self.configuration = next.1; smartcar = status
             loaded = true; error = nil
         } catch is CancellationError {} catch { if refreshID == id { self.error = error.localizedDescription } }
     }

@@ -653,6 +653,28 @@ extension PitPilotTests {
         XCTAssertEqual(model.smartcar?.connectionId, "existing-binding")
         XCTAssertEqual(model.smartcar?.state, "connected")
     }
+
+    @MainActor
+    func testDisabledSmartcarDoesNotRequestUnavailableStatusOrHidePiDevices() async throws {
+        let fixture = HTTPFixture()
+        defer { fixture.close() }
+        let reported = expectation(description: "Device and configuration telemetry delivered")
+        reported.expectedFulfillmentCount = 2
+        fixture.configure(.routes([
+            "/api/v1/vehicles/synthetic-vehicle/devices": Data("[{\"id\":\"synthetic-device\",\"vehicleId\":\"synthetic-vehicle\",\"name\":\"Synthetic Pi\",\"createdAt\":\"2026-01-01T00:00:00Z\",\"autoUpdate\":true}]".utf8),
+            "/api/v1/integrations/smartcar": try APIClient.body(["configured": false, "mode": "", "connectAvailable": false, "pollIntervalSeconds": 0])
+        ]), reported: reported)
+        let model = VehicleIntegrations(vehicleID: "synthetic-vehicle", client: fixture.client, browser: CancellingSmartcarBrowser())
+        await model.refresh()
+        await fulfillment(of: [reported], timeout: 2)
+        XCTAssertTrue(model.loaded)
+        XCTAssertNil(model.error)
+        XCTAssertNil(model.smartcar)
+        XCTAssertEqual(model.configuration?.configured, false)
+        XCTAssertEqual(model.devices.first?.name, "Synthetic Pi")
+        XCTAssertEqual(fixture.requests.count, 2)
+        XCTAssertFalse(fixture.requests.contains { $0.path.hasSuffix("/synthetic-vehicle/smartcar") })
+    }
 }
 
 @MainActor
