@@ -280,9 +280,17 @@ final class PitPilotUITests: XCTestCase {
         let updates = app.switches["deviceAutoUpdate-fixture-device"]
         reveal(updates, app)
         XCTAssertEqual(updates.value as? String, "1")
-        updates.tap()
+        // SwiftUI exposes the whole labeled row as the switch; its center misses the control.
+        updates.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in updates.value as? String == "0" }, object: nil)], timeout: 5), .completed)
         capture("Pi waiting for pairing with updates paused", app)
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        let integrations = app.buttons["vehicleIntegrations"]
+        XCTAssertTrue(integrations.waitForExistence(timeout: 5))
+        integrations.tap()
+        XCTAssertTrue(app.buttons["pairPi"].waitForExistence(timeout: 5))
+        reveal(updates, app)
+        XCTAssertEqual(updates.value as? String, "0")
         let revoke = app.buttons["revokePi-fixture-device"]
         reveal(revoke, app); revoke.tap()
         XCTAssertTrue(app.buttons["confirmRevokePi"].waitForExistence(timeout: 5))
