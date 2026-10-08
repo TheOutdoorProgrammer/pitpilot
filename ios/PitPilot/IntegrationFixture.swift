@@ -27,7 +27,9 @@ enum IntegrationFixture {
         defer { lock.unlock() }
         if route == "/api/v1/integrations/smartcar" {
             let configured = !ProcessInfo.processInfo.arguments.contains("--ui-testing-smartcar-unconfigured")
-            return (200, ["configured": configured, "mode": configured ? "simulated" : "", "connectAvailable": configured, "pollIntervalSeconds": configured ? 3600 : 0])
+            var config: [String: Any] = ["configured": configured, "connectAvailable": configured, "pollIntervalSeconds": configured ? 3600 : 0]
+            if configured { config["mode"] = "simulated" }
+            return (200, config)
         }
         if route == "/api/v1/vehicles/test-vehicle/devices" {
             if method == "POST" {

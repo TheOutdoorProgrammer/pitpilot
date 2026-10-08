@@ -581,6 +581,20 @@ extension PitPilotTests {
         XCTAssertNil(APIClient.operation(route: "vehicles/private-vehicle/smartcar/sessions/private-session/secret", method: "POST"))
     }
 
+    func testSmartcarUnavailableCapabilitiesDecodeWithoutInventingReadings() throws {
+        for metrics in ["", ",\"supportedMetrics\":null", ",\"supportedMetrics\":[]"] {
+            let data = Data("{\"state\":\"provisioning\",\"unavailableSignals\":3,\"unsupportedSignals\":0\(metrics)}".utf8)
+            let status = try JSONDecoder().decode(SmartcarStatus.self, from: data)
+            XCTAssertEqual(status.title, "Waiting for vehicle data")
+            XCTAssertTrue(status.supportedMetrics.isEmpty)
+            XCTAssertEqual(status.unavailableSignals, 3)
+            XCTAssertNil(status.latestObservedAt)
+            XCTAssertNil(status.lastSuccessAt)
+        }
+        let candidate = try JSONDecoder().decode(SmartcarCandidate.self, from: Data("{\"candidateId\":\"synthetic-candidate\",\"make\":\"\",\"model\":\"\",\"year\":0}".utf8))
+        XCTAssertTrue(candidate.title.isEmpty)
+    }
+
     @MainActor
     func testCancelledSmartcarBrowserIsNotAnIntegrationError() async throws {
         let fixture = HTTPFixture()
@@ -662,7 +676,7 @@ extension PitPilotTests {
         reported.expectedFulfillmentCount = 2
         fixture.configure(.routes([
             "/api/v1/vehicles/synthetic-vehicle/devices": Data("[{\"id\":\"synthetic-device\",\"vehicleId\":\"synthetic-vehicle\",\"name\":\"Synthetic Pi\",\"createdAt\":\"2026-01-01T00:00:00Z\",\"autoUpdate\":true}]".utf8),
-            "/api/v1/integrations/smartcar": try APIClient.body(["configured": false, "mode": "", "connectAvailable": false, "pollIntervalSeconds": 0])
+            "/api/v1/integrations/smartcar": Data("{\"configured\":false,\"connectAvailable\":false,\"pollIntervalSeconds\":0}".utf8)
         ]), reported: reported)
         let model = VehicleIntegrations(vehicleID: "synthetic-vehicle", client: fixture.client, browser: CancellingSmartcarBrowser())
         await model.refresh()
@@ -671,6 +685,7 @@ extension PitPilotTests {
         XCTAssertNil(model.error)
         XCTAssertNil(model.smartcar)
         XCTAssertEqual(model.configuration?.configured, false)
+        XCTAssertNil(model.configuration?.mode)
         XCTAssertEqual(model.devices.first?.name, "Synthetic Pi")
         XCTAssertEqual(fixture.requests.count, 2)
         XCTAssertFalse(fixture.requests.contains { $0.path.hasSuffix("/synthetic-vehicle/smartcar") })

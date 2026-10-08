@@ -37,7 +37,7 @@ struct DevicePairing: Decodable, Identifiable {
 
 struct SmartcarConfiguration: Decodable {
     let configured: Bool
-    let mode: String
+    let mode: String?
     let connectAvailable: Bool
     let pollIntervalSeconds: Int
 }
@@ -80,6 +80,27 @@ struct SmartcarStatus: Decodable {
     }
     var canSync: Bool { ["provisioning", "connected", "temporary_error"].contains(state) }
     var canDisconnect: Bool { state != "disconnected" }
+}
+
+extension SmartcarStatus {
+    private enum CodingKeys: String, CodingKey {
+        case state, connectionId, lastAttemptAt, lastSuccessAt, latestObservedAt, nextAttemptAt
+        case errorCode, supportedMetrics, unavailableSignals, unsupportedSignals
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        state = try values.decode(String.self, forKey: .state)
+        connectionId = try values.decodeIfPresent(String.self, forKey: .connectionId)
+        lastAttemptAt = try values.decodeIfPresent(String.self, forKey: .lastAttemptAt)
+        lastSuccessAt = try values.decodeIfPresent(String.self, forKey: .lastSuccessAt)
+        latestObservedAt = try values.decodeIfPresent(String.self, forKey: .latestObservedAt)
+        nextAttemptAt = try values.decodeIfPresent(String.self, forKey: .nextAttemptAt)
+        errorCode = try values.decodeIfPresent(String.self, forKey: .errorCode)
+        supportedMetrics = try values.decodeIfPresent([String].self, forKey: .supportedMetrics) ?? []
+        unavailableSignals = try values.decodeIfPresent(Int.self, forKey: .unavailableSignals)
+        unsupportedSignals = try values.decodeIfPresent(Int.self, forKey: .unsupportedSignals)
+    }
 }
 
 struct SmartcarSession: Decodable {
