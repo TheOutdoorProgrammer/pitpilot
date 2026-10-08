@@ -1,0 +1,5 @@
+ipa: build/export/PitPilot.ipa
+build:
+  scheme: PitPilot
+  method: release-testing
+fail_on_development_signing: true

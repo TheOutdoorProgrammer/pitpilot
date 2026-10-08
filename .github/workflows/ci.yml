@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - run: go test -race ./...
+      - run: go vet ./...
+      - name: Check reachable Go vulnerabilities
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
+      - name: Validate release configuration
+        uses: goreleaser/goreleaser-action@v7
+        with:
+          version: '~> v2'
+          args: check
+      - name: Build release artifacts
+        uses: goreleaser/goreleaser-action@v7
+        with:
+          version: '~> v2'
+          args: build --snapshot --clean
+      - name: Build runtime image
+        run: docker build --build-arg TARGETARCH=amd64 --tag pitpilot:ci .
+
+  ios:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v5
+      - name: Generate Xcode project
+        run: brew install xcodegen && xcodegen generate --spec ios/project.yml
+      - name: Test native app
+        run: xcodebuild test -project ios/PitPilot.xcodeproj -scheme PitPilot -destination 'platform=iOS Simulator,name=iPhone 17'

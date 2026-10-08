@@ -1,0 +1,4 @@
+*
+!dist/
+!dist/pitpilot_linux_*/
+!dist/pitpilot_linux_*/pitpilot

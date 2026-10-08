@@ -1,0 +1,114 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      scope:
+        description: Release channel
+        type: choice
+        default: Release
+        options: [Release, Release Candidate]
+      bump:
+        description: Version component to increment
+        type: choice
+        default: patch
+        options: [patch, minor, major]
+      dry-run:
+        description: Build and sign without publishing or tagging
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pitpilot-release
+  cancel-in-progress: false
+
+jobs:
+  ios:
+    runs-on: macos-26
+    outputs:
+      artifact-name: ${{ steps.stage.outputs.artifact-name }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Generate Xcode project
+        run: brew install xcodegen && xcodegen generate --spec ios/project.yml
+      - name: Test native app
+        run: xcodebuild test -project ios/PitPilot.xcodeproj -scheme PitPilot -destination 'platform=iOS Simulator,name=iPhone 17'
+      - name: Persistent Apple signing
+        id: signing
+        uses: TheOutdoorProgrammer/quill/apple-signing@723f17f36a1fdaa61001aabe33aeb70702c02d45
+        with:
+          p12-file-base64: ${{ secrets.APPSTORE_CERTIFICATES_FILE_BASE64 }}
+          p12-password: ${{ secrets.APPSTORE_CERTIFICATES_PASSWORD }}
+          issuer-id: ${{ secrets.ASC_ISSUER_ID }}
+          api-key-id: ${{ secrets.ASC_KEY_ID }}
+          api-private-key: ${{ secrets.ASC_KEY_P8 }}
+          bundle-identifiers: com.theoutdoorprogrammer.pitpilot
+      - name: Archive, export, and verify
+        env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          PROFILE_NAME: ${{ steps.signing.outputs.profile-name }}
+          PROFILE_UUID: ${{ steps.signing.outputs.profile-uuid }}
+          SIGNING_KEYCHAIN: ${{ steps.signing.outputs.keychain }}
+          SIGNING_KEYCHAIN_PASSWORD: ${{ steps.signing.outputs.keychain-password }}
+          PITPILOT_BASE_URL: ${{ secrets.PITPILOT_BASE_URL }}
+          FLEDGE_BASE_URL: ${{ secrets.FLEDGE_URL }}
+          BUILD_NUMBER: ${{ github.run_number }}
+        run: bash scripts/release-ios.sh
+      - id: stage
+        uses: TheOutdoorProgrammer/quill/stage@v1
+        with:
+          name: pitpilot-ios-${{ github.run_id }}
+          path: ${{ runner.temp }}/pitpilot-export/PitPilot.ipa
+
+  release:
+    needs: ios
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Test backend
+        run: go test -race ./...
+      - name: Vet backend
+        run: go vet ./...
+      - name: Check reachable Go vulnerabilities
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
+      - uses: actions/download-artifact@v5
+        with:
+          name: ${{ needs.ios.outputs.artifact-name }}
+          path: ${{ runner.temp }}/quill-staged
+      # The reusable workflow lacks emulation required by the arm64 runtime
+      # verification. Keep the runner setup here and all release logic in Quill.
+      - uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+      - id: quill
+        uses: TheOutdoorProgrammer/quill@v1
+        with:
+          github-token: ${{ github.token }}
+          fledge-ipa: ${{ runner.temp }}/quill-staged/PitPilot.ipa
+          fledge-server: ${{ secrets.FLEDGE_URL }}
+          bump: ${{ inputs.bump }}
+          scope: ${{ inputs.scope }}
+          dry-run: ${{ inputs.dry-run }}
+          publish: goreleaser,fledge,docker
+          docker-images: ghcr.io/theoutdoorprogrammer/pitpilot
+          docker-platforms: linux/amd64,linux/arm64
+          # Snapshot outputs must never satisfy a stable image build from cache.
+          docker-dry-run: false
+          docker-cache: false
+          docker-sbom: true
+          docker-provenance: mode=max
+          fledge-fail-on-development-signing: true
+          fledge-secure: true
