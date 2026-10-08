@@ -179,6 +179,7 @@ func TestConvertBlocksUnsupportedUnitsCollectionsAndRecurringTaxes(t *testing.T)
 		{"distance", func(r *Request) { r.Options.DistanceUnit = "km" }},
 		{"fuel", func(r *Request) { r.Options.FuelUnit = "liters" }},
 		{"timezone missing", func(r *Request) { r.Options.Timezone = "" }},
+		{"timezone host dependent", func(r *Request) { r.Options.Timezone = "Local" }},
 		{"timezone invalid", func(r *Request) { r.Options.Timezone = "Not/AZone" }},
 		{"version", func(r *Request) { r.Export.FormatVersion = 2 }},
 		{"unknown records", func(r *Request) { r.Export.Collections["newrecords"] = []json.RawMessage{json.RawMessage(`{"_id":1}`)} }},

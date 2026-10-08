@@ -191,8 +191,8 @@ func Convert(req Request) (batch garage.ImportBatch, summary Summary, err error)
 	if o.Currency != "USD" || o.DistanceUnit != "mi" || o.FuelUnit != "us-gal" {
 		return batch, summary, errors.New("this importer currently requires USD, mi and us-gal; do not relabel other units")
 	}
-	if o.Timezone == "" {
-		return batch, summary, errors.New("source timezone is required")
+	if o.Timezone == "" || o.Timezone == "Local" {
+		return batch, summary, errors.New("an explicit source timezone is required; host-dependent Local is unsupported")
 	}
 	zone, e := time.LoadLocation(o.Timezone)
 	if e != nil {

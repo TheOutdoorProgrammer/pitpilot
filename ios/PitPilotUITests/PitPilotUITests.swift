@@ -86,9 +86,10 @@ final class PitPilotUITests: XCTestCase {
         XCTAssertTrue(information.waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Estimated odometer")).firstMatch.exists)
         information.tap()
-        XCTAssertTrue(app.staticTexts["SYNTHETIC-VIN"].exists)
-        XCTAssertTrue(app.staticTexts["TEST-ONLY"].exists)
+        XCTAssertTrue(app.staticTexts["VIN, SYNTHETIC-VIN"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["License plate, TEST-ONLY"].exists)
         XCTAssertTrue(app.staticTexts["Synthetic region"].exists)
+        XCTAssertTrue(app.staticTexts["Source record: 1"].exists)
         capture("Imported vehicle metadata", app)
         information.tap()
         let search = app.textFields["historySearch"]
@@ -98,7 +99,7 @@ final class PitPilotUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Synthetic collector journal"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.staticTexts["Synthetic daily reading"].exists)
         app.staticTexts["Synthetic collector journal"].tap()
-        XCTAssertTrue(app.staticTexts["Undated"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Date, Undated"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.staticTexts["USD"].exists)
         XCTAssertTrue(app.staticTexts["Migration acceptance note"].exists)
         capture("Imported undated note", app)
@@ -134,8 +135,8 @@ final class PitPilotUITests: XCTestCase {
         app.buttons["Upcoming"].tap()
         XCTAssertTrue(app.staticTexts["Synthetic planned repair"].waitForExistence(timeout: 5))
         app.staticTexts["Synthetic planned repair"].tap()
-        XCTAssertTrue(app.staticTexts["Critical"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.staticTexts["Planned"].exists)
+        XCTAssertTrue(app.staticTexts["Priority, Critical"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Status, Planned"].exists)
         capture("Imported planned work", app)
         let linkedReminder = app.buttons["Synthetic recurring oil"]
         if !linkedReminder.isHittable { app.swipeUp() }

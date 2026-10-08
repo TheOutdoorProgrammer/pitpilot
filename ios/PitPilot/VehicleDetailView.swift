@@ -36,7 +36,7 @@ struct VehicleDetailView: View {
                             if let plate = vehicle.licensePlate, !plate.isEmpty { LabeledContent("License plate", value: plate) }
                             if let notes = vehicle.notes, !notes.isEmpty { Text(notes).textSelection(.enabled) }
                             MetadataContent(tags: vehicle.tags, fields: vehicle.extraFields, source: vehicle.source)
-                        }.font(.subheadline).padding(.top, 10)
+                        }.font(.subheadline).fixedSize(horizontal: false, vertical: true).padding(.top, 10)
                     }.accessibilityIdentifier("vehicleInformation").padding(16).background(PitStyle.panel, in: RoundedRectangle(cornerRadius: 16))
                 }
                 if store.offline { OfflineBanner(date: store.cache.updatedAt) }
@@ -101,7 +101,7 @@ struct VehicleDetailView: View {
                 Text("All history").tag("all")
                 ForEach(RecordKind.allCases.filter { $0 != .plan }) { Text($0.label).tag($0.rawValue) }
             }.pickerStyle(.menu).accessibilityIdentifier("historyFilter")
-            Text("\(historyRecords.count) records").font(.caption).foregroundStyle(.secondary)
+            Text("\(historyRecords.count) \(historyRecords.count == 1 ? "record" : "records")").font(.caption).foregroundStyle(.secondary)
             if detail.records.filter({ $0.kind != .plan }).isEmpty {
                 ContentUnavailableView("A fresh start", systemImage: "wrench.and.screwdriver", description: Text("Log a service, repair, fuel stop, or note. Your vehicle's story starts here."))
             } else if historyRecords.isEmpty {
