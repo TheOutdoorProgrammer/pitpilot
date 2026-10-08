@@ -45,7 +45,9 @@ Unchecked items are planned. This checklist separates the replacement baseline f
 - [ ] Persist observations offline and upload them with retry, acknowledgement, and duplicate prevention.
 - [ ] Recover from power loss, intermittent adapters, incorrect clocks, and exhausted local storage without silently losing acknowledged data.
 - [ ] Show connection state, queued data, last observation, last upload, and actionable recovery guidance in the app.
-- [ ] Deliver authenticated collector updates with a tested recovery path and compatibility checks.
+- [ ] Let the Pi automatically check for, download, verify, and install signed collector releases without SSH or manual installation, with compatibility checks before activation.
+- [ ] Preserve queued observations and configuration during automatic updates; recover from interrupted installation and automatically roll back if the updated collector fails its health checks.
+- [ ] Show the installed version, update status, and failures in the app, with controls to pause automatic updates or retry a failed update.
 - [ ] Provide useful diagnostics without exposing credentials, location history, or personal records in operational logs.
 
 ### Smartcar integration
