@@ -175,6 +175,9 @@ func TestImportPreservesUserEditAndRollsBackAllConflictingChanges(t *testing.T) 
 	if err != nil || preview.Conflicts != 1 || preview.Updated != 1 || preview.Created != 1 {
 		t.Fatalf("conflict preview: %+v %v", preview, err)
 	}
+	if len(preview.ConflictDetails) != 1 || preview.ConflictDetails[0].TargetID != id || preview.ConflictDetails[0].SourceID != "1" || preview.ConflictDetails[0].Reason != "source-and-target-changed" {
+		t.Fatal("conflict does not identify the record requiring reconciliation")
+	}
 	before, err := s.Export(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -192,6 +195,29 @@ func TestImportPreservesUserEditAndRollsBackAllConflictingChanges(t *testing.T) 
 	before.ExportedAt = after.ExportedAt
 	if !reflect.DeepEqual(before, after) {
 		t.Fatal("conflicted batch partially changed target or provenance")
+	}
+}
+
+func TestImportAcceptsIndependentlyReconciledEdits(t *testing.T) {
+	s := importStore(t)
+	batch := importFixtureBatch(t)
+	applyFixture(t, s, batch)
+	id := ImportID(importFixtureSource, "notes", "1")
+	_, err := s.UpdateEntry(context.Background(), id, "record", func(fields map[string]json.RawMessage) error {
+		fields["notes"] = json.RawMessage(`"Agreed text"`)
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	replaceFixtureNote(t, &batch, "1", "1", "Agreed text")
+	report := applyFixture(t, s, batch)
+	if report.Updated != 1 || report.Conflicts != 0 {
+		t.Fatalf("matching edits did not reconcile: %+v", report)
+	}
+	report = applyFixture(t, s, batch)
+	if report.Skipped != 4 {
+		t.Fatal("reconciled source identity was not retained")
 	}
 }
 

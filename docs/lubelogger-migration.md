@@ -64,7 +64,7 @@ Check the garage, full notes, custom fields, odometer provenance, upcoming plans
 
 - Same source and unchanged data: skip, including when you edited the PitPilot projection.
 - Changed source and untouched PitPilot projection: update from the source atomically.
-- Both changed: report a conflict and apply nothing. Reconcile the difference before trying again.
+- Both changed: report a conflict and apply nothing. The report identifies the source collection, source ID, target ID and reason for up to 100 conflicts, with an explicit omitted count if there are more. Reconcile the difference before trying again. If the proposed source projection already exactly matches the target, the importer can accept the reconciled mapping.
 - Deleted PitPilot target: conflict; imports do not resurrect it silently.
 - Source record removed: retain the PitPilot copy and report it. Imports never infer deletion from an incomplete source snapshot.
 

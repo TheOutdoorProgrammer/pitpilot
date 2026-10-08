@@ -35,13 +35,31 @@ type ImportBatch struct {
 }
 
 type ImportReport struct {
-	Created      int    `json:"created"`
-	Updated      int    `json:"updated"`
-	Skipped      int    `json:"skipped"`
-	Conflicts    int    `json:"conflicts"`
-	Retained     int    `json:"retained"`
-	PreviewToken string `json:"previewToken"`
-	Applied      bool   `json:"applied"`
+	Created                int              `json:"created"`
+	Updated                int              `json:"updated"`
+	Skipped                int              `json:"skipped"`
+	Conflicts              int              `json:"conflicts"`
+	Retained               int              `json:"retained"`
+	PreviewToken           string           `json:"previewToken"`
+	Applied                bool             `json:"applied"`
+	ConflictDetails        []ImportConflict `json:"conflictDetails,omitempty"`
+	ConflictDetailsOmitted int              `json:"conflictDetailsOmitted,omitempty"`
+}
+
+type ImportConflict struct {
+	Collection string `json:"collection"`
+	SourceID   string `json:"sourceId"`
+	TargetID   string `json:"targetId"`
+	Reason     string `json:"reason"`
+}
+
+func (r *ImportReport) conflict(item ImportItem, reason string) {
+	r.Conflicts++
+	if len(r.ConflictDetails) < 100 {
+		r.ConflictDetails = append(r.ConflictDetails, ImportConflict{item.Collection, item.SourceID, item.ID, reason})
+	} else {
+		r.ConflictDetailsOmitted++
+	}
 }
 
 func digest(data []byte) string {
@@ -187,23 +205,27 @@ func (s *Store) Import(ctx context.Context, batch ImportBatch, applyToken string
 		h.Write(state)
 		if isNew {
 			if v.Kind != "archive" && e == nil {
-				report.Conflicts++
+				report.conflict(v, "target-already-exists")
 				continue
 			}
 			report.Created++
 			changes = append(changes, mutation{v, sourceHash, targetHash, true})
 			continue
 		}
-		if oldID != v.ID || oldKind != v.Kind || errors.Is(e, sql.ErrNoRows) {
-			report.Conflicts++
+		if oldID != v.ID || oldKind != v.Kind {
+			report.conflict(v, "identity-changed")
+			continue
+		}
+		if errors.Is(e, sql.ErrNoRows) {
+			report.conflict(v, "target-deleted")
 			continue
 		}
 		if sourceHash == oldSource {
 			report.Skipped++
 			continue
 		}
-		if v.Kind != "archive" && currentHash != oldTarget {
-			report.Conflicts++
+		if v.Kind != "archive" && currentHash != oldTarget && currentHash != targetHash {
+			report.conflict(v, "source-and-target-changed")
 			continue
 		}
 		report.Updated++

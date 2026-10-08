@@ -6,7 +6,7 @@ builds:
     main: ./cmd/pitpilot
     binary: pitpilot
     env: [CGO_ENABLED=0]
-    goos: [linux]
+    goos: [linux, darwin]
     goarch: [amd64, arm64]
     flags: [-trimpath]
     ldflags:
@@ -17,7 +17,17 @@ archives:
   - id: pitpilot
     ids: [pitpilot]
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
-    files: [README.md, FEATURES.md]
+    files:
+      - README.md
+      - FEATURES.md
+      - docs/api.md
+      - docs/lubelogger-migration.md
+      - tools/lubelogger-extract/*.cs
+      - tools/lubelogger-extract/*.csproj
+      - tools/lubelogger-extract/packages.lock.json
+      - tools/lubelogger-extract/README.md
+      - tools/lubelogger-extract/THIRD-PARTY-NOTICES.txt
+      - tools/lubelogger-extract/*.sb
 
 checksum:
   name_template: checksums.txt
