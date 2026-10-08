@@ -1,0 +1,10 @@
+/bin/
+/dist/
+/build/
+*.db
+*.db-shm
+*.db-wal
+.env
+.DS_Store
+*.xcuserstate
+xcuserdata/
