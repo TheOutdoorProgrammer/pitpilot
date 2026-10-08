@@ -290,8 +290,8 @@ private struct SignalSeriesChart: View {
             ForEach(data.buckets) { bucket in
                 if data.kind == .bars {
                     let bounds = data.barBounds(bucket)
-                    BarMark(xStart: .value("Bar start", bounds.lowerBound), xEnd: .value("Bar end", bounds.upperBound),
-                            yStart: .value("Baseline", 0), yEnd: .value("Value", bucket.point.mean))
+                    RectangleMark(xStart: .value("Bar start", bounds.lowerBound), xEnd: .value("Bar end", bounds.upperBound),
+                                  yStart: .value("Baseline", 0.0), yEnd: .value("Value", bucket.point.mean))
                         .foregroundStyle(tint.gradient)
                         .accessibilityLabel("\(data.xLabel(bucket.center)), \(bucket.point.count > 1 ? "average" : "value")")
                         .accessibilityValue(SignalFormat.value(bucket.point.mean, unit: unit))
