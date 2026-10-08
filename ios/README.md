@@ -8,11 +8,12 @@ Install Xcode and XcodeGen, then run from this directory:
 
 ```sh
 xcodegen generate
-xcodebuild -project PitPilot.xcodeproj -scheme PitPilot \
-  -destination 'platform=iOS Simulator,name=iPhone 17' test
+bash ../scripts/test-ios.sh
 ```
 
 The Xcode project and Info.plist are generated from `project.yml`. Release automation supplies signing, the build number, and optionally `PITPILOT_BASE_URL` to prefill the connection screen. No API token or telemetry ingestion credential belongs in build settings or the application bundle.
+
+Both GitHub iOS jobs use the repository's self-hosted macOS runner. The test helper needs jq and an installed runtime supporting iPhone 17. It prepares accessibility on a disposable simulator, runs the full suite, and removes only that simulator on exit.
 
 The instrument-dial app icon is reproducible:
 

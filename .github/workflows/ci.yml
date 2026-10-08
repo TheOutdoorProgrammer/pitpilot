@@ -39,10 +39,17 @@ jobs:
         run: docker build --build-arg TARGETARCH=amd64 --tag pitpilot:ci .
 
   ios:
-    runs-on: macos-26
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, macOS, ARM64, mini-2, release, pitpilot]
+    timeout-minutes: 45
+    concurrency:
+      group: pitpilot-ios
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
       - name: Generate Xcode project
-        run: brew install xcodegen && xcodegen generate --spec ios/project.yml
+        run: xcodegen generate --spec ios/project.yml
       - name: Test native app
-        run: xcodebuild test -project ios/PitPilot.xcodeproj -scheme PitPilot -destination 'platform=iOS Simulator,name=iPhone 17'
+        run: bash scripts/test-ios.sh

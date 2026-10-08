@@ -61,13 +61,14 @@ The database directory contains personal records and location data. [Back it up 
 go test -race ./...
 go vet ./...
 go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
-brew install xcodegen
+brew install xcodegen jq
 xcodegen generate --spec ios/project.yml
-xcodebuild test -project ios/PitPilot.xcodeproj -scheme PitPilot \
-  -destination 'platform=iOS Simulator,name=iPhone 17'
+bash scripts/test-ios.sh
 ```
 
 The Release workflow signs and stages the iOS app, then uses [Quill](https://github.com/TheOutdoorProgrammer/quill) to publish it through [Fledge](https://github.com/TheOutdoorProgrammer/fledge), build Go artifacts with GoReleaser, and publish the container. The Dockerfile copies the prebuilt Go artifacts; it never compiles Go. Release credentials and deployment endpoints are injected through repository secrets.
+
+iOS CI and release jobs use a repository-scoped, self-hosted macOS ARM64 runner with Xcode, an installed iPhone 17 simulator runtime, XcodeGen, and jq. The test helper creates and removes its own simulator. Fork pull requests run backend checks; native CI runs after changes reach a trusted repository branch. Signing uses a temporary keychain and restores the runner's prior keychain state.
 
 Self-hosters can build locally with `goreleaser build --snapshot --clean`, then `docker build --build-arg TARGETARCH=amd64 -t pitpilot:local .`. Mount the database directory, supply a token secret, and run only one server against a database. Container publishing and deployment promotion are separate operations; use the published digest in GitOps.
 

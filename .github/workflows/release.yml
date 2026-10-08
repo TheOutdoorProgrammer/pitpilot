@@ -27,15 +27,24 @@ concurrency:
 
 jobs:
   ios:
-    runs-on: macos-26
+    runs-on: [self-hosted, macOS, ARM64, mini-2, release, pitpilot]
+    timeout-minutes: 45
+    concurrency:
+      group: pitpilot-ios
+      cancel-in-progress: false
     outputs:
       artifact-name: ${{ steps.stage.outputs.artifact-name }}
     steps:
       - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
       - name: Generate Xcode project
-        run: brew install xcodegen && xcodegen generate --spec ios/project.yml
+        run: xcodegen generate --spec ios/project.yml
       - name: Test native app
-        run: xcodebuild test -project ios/PitPilot.xcodeproj -scheme PitPilot -destination 'platform=iOS Simulator,name=iPhone 17'
+        run: bash scripts/test-ios.sh
+      - name: Preserve runner Keychain state
+        id: keychain-state
+        run: ruby scripts/release-keychain.rb save "$RUNNER_TEMP/pitpilot-keychain-state.json"
       - name: Persistent Apple signing
         id: signing
         uses: TheOutdoorProgrammer/quill/apple-signing@723f17f36a1fdaa61001aabe33aeb70702c02d45
@@ -57,6 +66,10 @@ jobs:
           FLEDGE_BASE_URL: ${{ secrets.FLEDGE_URL }}
           BUILD_NUMBER: ${{ github.run_number }}
         run: bash scripts/release-ios.sh
+      # Run before the signing action's post-job deletion of its temporary keychain.
+      - name: Restore runner Keychain state
+        if: always() && steps.keychain-state.outcome == 'success'
+        run: ruby scripts/release-keychain.rb restore "$RUNNER_TEMP/pitpilot-keychain-state.json"
       - id: stage
         uses: TheOutdoorProgrammer/quill/stage@v1
         with:
