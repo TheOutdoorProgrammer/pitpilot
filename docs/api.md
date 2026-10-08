@@ -52,7 +52,9 @@ The native client reports `operation`, `durationMs`, and `statusCode` through th
 
 ## Export and backup
 
-Exports contain `schemaVersion: 2`, `exportedAt`, `vehicles`, `records`, `reminders`, `trips`, `importSources` and `importSettings`. Import sources retain source identities, original domain JSON and reconciliation hashes. Import settings pin the interpretation first used for each source; mismatched later settings return `409`. The database snapshot is read in one transaction. Protect exported files as personal data. A general JSON restore endpoint is not yet available.
+Exports contain `schemaVersion: 3`, `exportedAt`, `vehicles`, `records`, `reminders`, `trips`, `importSources`, `importSettings`, `signals`, `signalContexts`, `signalBatches` and `convertedSignalNotes`. Import sources retain source identities, original domain JSON and reconciliation hashes. Import settings pin the interpretation first used for each source; mismatched later settings return `409`. Converted notes retain their original records and structured batches. The database snapshot is read in one transaction. Protect exported files as personal data. A general JSON restore endpoint is not yet available.
+
+Opening an older database upgrades it to schema 3. A schema 2 server will refuse to open it afterward. To roll back the server version, restore the verified pre-upgrade backup with the service stopped; do not change the schema version pragma to bypass this check.
 
 For a complete backup, stop the single server instance, copy the entire database directory including any SQLite WAL files, and restart it. Restore the directory with the service stopped and the same file permissions. Test the restored instance before replacing the original. Never run two replicas against the SQLite volume.
 

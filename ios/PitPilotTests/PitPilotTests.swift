@@ -49,8 +49,10 @@ final class PitPilotTests: XCTestCase {
         var cache = GarageCache()
         cache.signals = ["synthetic": try JSONDecoder().decode(LatestSignals.self, from: signalFixture)]
         let store = GarageStore(connection: fixture.connection, cache: cache, cacheURL: directory.appendingPathComponent("garage.json"), session: fixture.session)
-        fixture.configure(.failure(.timedOut))
+        let timeoutReported = expectation(description: "Signal timeout telemetry completed before session teardown")
+        fixture.configure(.failure(.timedOut), reported: timeoutReported)
         await store.refreshSignals("synthetic")
+        await fulfillment(of: [timeoutReported], timeout: 2)
         XCTAssertFalse(store.offline)
         XCTAssertNil(store.error)
         XCTAssertNotNil(store.signalErrors["synthetic"])
@@ -59,8 +61,10 @@ final class PitPilotTests: XCTestCase {
         await store.refreshSignals("synthetic")
         XCTAssertFalse(store.offline)
         XCTAssertTrue(store.signalsRefreshing.isEmpty)
-        fixture.configure(.json(signalFixture))
+        let recoveryReported = expectation(description: "Signal recovery telemetry completed before session teardown")
+        fixture.configure(.json(signalFixture), reported: recoveryReported)
         await store.refreshSignals("synthetic")
+        await fulfillment(of: [recoveryReported], timeout: 2)
         XCTAssertNil(store.signalErrors["synthetic"])
         XCTAssertEqual(store.signals("synthetic")?.series.count, 1)
     }
@@ -68,7 +72,10 @@ final class PitPilotTests: XCTestCase {
     func testSignalHistoryUsesEncodedQueryAndBoundedTelemetryOperation() async throws {
         let fixture = HTTPFixture()
         defer { fixture.close() }
+        let reported = expectation(description: "History telemetry completed before session teardown")
+        fixture.configure(.success, reported: reported)
         let _: [Vehicle] = try await fixture.client.request("vehicles/private-id/signals/history", query: [URLQueryItem(name: "metric", value: "fuel_level_pct"), URLQueryItem(name: "from", value: "2026-10-08T00:00:00+01:00")])
+        await fulfillment(of: [reported], timeout: 2)
         let url = try XCTUnwrap(fixture.requests.first)
         XCTAssertEqual(url.path, "/api/v1/vehicles/private-id/signals/history")
         let query = try XCTUnwrap(URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems)

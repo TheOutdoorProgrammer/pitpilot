@@ -182,8 +182,12 @@ final class PitPilotUITests: XCTestCase {
         XCTAssertFalse(app.descendants(matching: .any)["signalHistoryChart"].exists)
         capture("Fuel calendar-day chart", app)
         XCUIDevice.shared.orientation = .landscapeLeft
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in app.frame.width > app.frame.height }, object: nil)], timeout: 5), .completed)
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.8)).press(forDuration: 0.1,
+            thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4)))
         capture("Fuel chart landscape", app)
         XCUIDevice.shared.orientation = .portrait
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in app.frame.width < app.frame.height }, object: nil)], timeout: 5), .completed)
         app.navigationBars.buttons.element(boundBy: 0).tap()
         let manifold = app.buttons["signal-manifold_kpa"]
         for _ in 0..<4 where !manifold.isHittable { app.swipeUp() }

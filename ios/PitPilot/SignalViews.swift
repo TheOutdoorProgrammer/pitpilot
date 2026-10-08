@@ -283,7 +283,7 @@ private struct SignalHistoryChart: View {
             }
         }
         .chartXSelection(value: $selectedDate)
-        .chartXScale(domain: timeRange)
+        .chartXScale(domain: timeRange, range: .plotDimension(padding: 8))
         .chartPlotStyle { $0.clipped() }
         .chartYAxisLabel(history.unit)
         .chartLegend(position: .bottom, alignment: .leading)
