@@ -95,6 +95,7 @@ struct APIClient {
             case 200..<300: return data
             case 401, 403: throw APIError.message("Your connection is not authorized. Check the API token in Settings.")
             case 404: throw APIError.message("This item no longer exists on the server. Refresh and try again.")
+            case 409: throw APIError.message("This item changed on the server. Close this form, review the refreshed record, and try again.")
             case 400, 422: throw APIError.message("The server could not accept these values. Check the form and try again.")
             default: throw APIError.message("The server could not complete the request (\(response.statusCode)). Try again shortly.")
             }
@@ -134,7 +135,7 @@ struct APIClient {
         if parts.count == 2 {
             let resource: String
             switch parts[0] { case "vehicles": resource = "vehicle"; case "records": resource = "record"; case "reminders": resource = "reminder"; case "trips": resource = "trip"; default: return nil }
-            switch method { case "GET": return resource == "vehicle" ? "vehicle.get" : nil; case "PATCH": return resource == "vehicle" || resource == "reminder" ? resource + ".update" : nil; case "DELETE": return resource + ".delete"; default: return nil }
+            switch method { case "GET": return resource == "vehicle" ? "vehicle.get" : nil; case "PATCH": return ["vehicle", "record", "reminder"].contains(resource) ? resource + ".update" : nil; case "DELETE": return resource + ".delete"; default: return nil }
         }
         if parts.count == 3 && parts[0] == "vehicles" {
             switch (parts[2], method) {

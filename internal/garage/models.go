@@ -8,34 +8,54 @@ import (
 )
 
 type Vehicle struct {
-	ID            string    `json:"id"`
-	Name          string    `json:"name"`
-	Make          string    `json:"make"`
-	Model         string    `json:"model"`
-	Year          int       `json:"year"`
-	OdometerMiles float64   `json:"odometerMiles"`
-	CreatedAt     time.Time `json:"createdAt"`
+	ID            string       `json:"id"`
+	Name          string       `json:"name"`
+	Make          string       `json:"make"`
+	Model         string       `json:"model"`
+	Year          int          `json:"year"`
+	OdometerMiles float64      `json:"odometerMiles"`
+	CreatedAt     time.Time    `json:"createdAt"`
+	VIN           string       `json:"vin,omitempty"`
+	LicensePlate  string       `json:"licensePlate,omitempty"`
+	Notes         string       `json:"notes,omitempty"`
+	Tags          []string     `json:"tags,omitempty"`
+	ExtraFields   []ExtraField `json:"extraFields,omitempty"`
+	Source        *Source      `json:"source,omitempty"`
 }
 
 type Record struct {
-	ID            string   `json:"id"`
-	VehicleID     string   `json:"vehicleId"`
-	Kind          string   `json:"kind"`
-	Date          string   `json:"date"`
-	Title         string   `json:"title"`
-	Notes         string   `json:"notes"`
-	OdometerMiles float64  `json:"odometerMiles"`
-	CostCents     int64    `json:"costCents"`
-	Gallons       *float64 `json:"gallons"`
+	ID                   string       `json:"id"`
+	VehicleID            string       `json:"vehicleId"`
+	Kind                 string       `json:"kind"`
+	Date                 string       `json:"date"`
+	Title                string       `json:"title"`
+	Notes                string       `json:"notes"`
+	OdometerMiles        float64      `json:"odometerMiles"`
+	CostCents            int64        `json:"costCents"`
+	Gallons              *float64     `json:"gallons"`
+	Tags                 []string     `json:"tags,omitempty"`
+	ExtraFields          []ExtraField `json:"extraFields,omitempty"`
+	Pinned               bool         `json:"pinned,omitempty"`
+	InitialOdometerMiles *float64     `json:"initialOdometerMiles,omitempty"`
+	OdometerStatus       string       `json:"odometerStatus,omitempty"`
+	Plan                 *PlanDetails `json:"plan,omitempty"`
+	Fuel                 *FuelDetails `json:"fuel,omitempty"`
+	Source               *Source      `json:"source,omitempty"`
 }
 
 type Reminder struct {
-	ID               string   `json:"id"`
-	VehicleID        string   `json:"vehicleId"`
-	Title            string   `json:"title"`
-	DueDate          *string  `json:"dueDate"`
-	DueOdometerMiles *float64 `json:"dueOdometerMiles"`
-	Completed        bool     `json:"completed"`
+	ID               string              `json:"id"`
+	VehicleID        string              `json:"vehicleId"`
+	Title            string              `json:"title"`
+	DueDate          *string             `json:"dueDate"`
+	DueOdometerMiles *float64            `json:"dueOdometerMiles"`
+	Completed        bool                `json:"completed"`
+	Notes            string              `json:"notes,omitempty"`
+	Tags             []string            `json:"tags,omitempty"`
+	ExtraFields      []ExtraField        `json:"extraFields,omitempty"`
+	Recurrence       *Recurrence         `json:"recurrence,omitempty"`
+	Thresholds       *ReminderThresholds `json:"thresholds,omitempty"`
+	Source           *Source             `json:"source,omitempty"`
 }
 
 type Point struct {
@@ -70,19 +90,22 @@ func (v Vehicle) Validate() error {
 	if !bounded(v.OdometerMiles, 10000000) {
 		return errors.New("invalid odometer mileage")
 	}
-	return nil
+	if len(v.VIN) > 100 || len(v.LicensePlate) > 100 || len(v.Notes) > 20000 {
+		return errors.New("vehicle metadata exceeds allowed length")
+	}
+	return validateMetadata(v.Tags, v.ExtraFields)
 }
 
 func (r Record) Validate() error {
 	switch r.Kind {
-	case "service", "repair", "upgrade", "fuel", "expense", "note":
+	case "service", "repair", "upgrade", "fuel", "expense", "note", "odometer", "plan":
 	default:
 		return errors.New("invalid record kind")
 	}
 	if !validTitle(r.Title) || len(r.Notes) > 20000 {
 		return errors.New("title is required; record text exceeds allowed length")
 	}
-	if !validDate(r.Date) {
+	if !validDate(r.Date) && !(r.Date == "" && (r.Kind == "note" || r.Kind == "plan")) {
 		return errors.New("date must be YYYY-MM-DD")
 	}
 	if !bounded(r.OdometerMiles, 10000000) || r.CostCents < 0 || r.CostCents > 100000000000 {
@@ -91,7 +114,7 @@ func (r Record) Validate() error {
 	if r.Gallons != nil && (!bounded(*r.Gallons, 10000) || *r.Gallons == 0 || r.Kind != "fuel") {
 		return errors.New("gallons must be positive and belong to a fuel record")
 	}
-	return nil
+	return r.validateDetails()
 }
 
 func (r Reminder) Validate() error {
@@ -107,7 +130,16 @@ func (r Reminder) Validate() error {
 	if r.DueOdometerMiles != nil && !bounded(*r.DueOdometerMiles, 10000000) {
 		return errors.New("invalid due mileage")
 	}
-	return nil
+	if len(r.Notes) > 20000 {
+		return errors.New("reminder notes exceed allowed length")
+	}
+	if err := validateMetadata(r.Tags, r.ExtraFields); err != nil {
+		return err
+	}
+	if err := r.Recurrence.validate(r); err != nil {
+		return err
+	}
+	return r.Thresholds.validate()
 }
 
 func (t Trip) Validate() error {

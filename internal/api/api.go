@@ -43,6 +43,7 @@ func New(store *garage.Store, token string, logger *slog.Logger) (http.Handler, 
 	register("DELETE /api/v1/vehicles/{id}", s.deleteVehicle)
 	register("GET /api/v1/vehicles/{id}/records", s.listEntries("record"))
 	register("POST /api/v1/vehicles/{id}/records", s.createRecord)
+	register("PATCH /api/v1/records/{id}", s.updateRecord)
 	register("DELETE /api/v1/records/{id}", s.deleteEntry("record"))
 	register("GET /api/v1/vehicles/{id}/reminders", s.listEntries("reminder"))
 	register("POST /api/v1/vehicles/{id}/reminders", s.createReminder)
@@ -53,6 +54,7 @@ func New(store *garage.Store, token string, logger *slog.Logger) (http.Handler, 
 	register("DELETE /api/v1/trips/{id}", s.deleteEntry("trip"))
 	register("GET /api/v1/export", s.export)
 	register("POST /api/v1/client-events", s.clientEvent)
+	s.registerMigration(register)
 	return telemetry.HTTP(mux, logger), nil
 }
 
@@ -136,6 +138,10 @@ func (s *Server) createVehicle(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &v) || !validate(w, v.Validate()) {
 		return
 	}
+	if v.Source != nil {
+		fail(w, 422, "source is managed by the importer")
+		return
+	}
 	v.ID = garage.NewID()
 	v.CreatedAt = time.Now().UTC()
 	v.Name = strings.TrimSpace(v.Name)
@@ -148,11 +154,16 @@ func (s *Server) createVehicle(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) updateVehicle(w http.ResponseWriter, r *http.Request) {
 	var patch struct {
-		Name          *string  `json:"name"`
-		Make          *string  `json:"make"`
-		Model         *string  `json:"model"`
-		Year          *int     `json:"year"`
-		OdometerMiles *float64 `json:"odometerMiles"`
+		Name          *string              `json:"name"`
+		Make          *string              `json:"make"`
+		Model         *string              `json:"model"`
+		Year          *int                 `json:"year"`
+		OdometerMiles *float64             `json:"odometerMiles"`
+		VIN           *string              `json:"vin"`
+		LicensePlate  *string              `json:"licensePlate"`
+		Notes         *string              `json:"notes"`
+		Tags          *[]string            `json:"tags"`
+		ExtraFields   *[]garage.ExtraField `json:"extraFields"`
 	}
 	if !decode(w, r, &patch) {
 		return
@@ -173,6 +184,21 @@ func (s *Server) updateVehicle(w http.ResponseWriter, r *http.Request) {
 		}
 		if patch.OdometerMiles != nil {
 			v.OdometerMiles = *patch.OdometerMiles
+		}
+		if patch.VIN != nil {
+			v.VIN = *patch.VIN
+		}
+		if patch.LicensePlate != nil {
+			v.LicensePlate = *patch.LicensePlate
+		}
+		if patch.Notes != nil {
+			v.Notes = *patch.Notes
+		}
+		if patch.Tags != nil {
+			v.Tags = *patch.Tags
+		}
+		if patch.ExtraFields != nil {
+			v.ExtraFields = *patch.ExtraFields
 		}
 		validationErr = v.Validate()
 		return validationErr
@@ -230,6 +256,10 @@ func (s *Server) createRecord(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &v) || !validate(w, v.Validate()) || !s.hasVehicle(w, r) {
 		return
 	}
+	if v.Source != nil {
+		fail(w, 422, "source is managed by the importer")
+		return
+	}
 	v.ID = garage.NewID()
 	v.VehicleID = r.PathValue("id")
 	if err := s.store.SaveEntry(r.Context(), v.ID, v.VehicleID, "record", v, true); err != nil {
@@ -243,6 +273,10 @@ func (s *Server) createReminder(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &v) || !validate(w, v.Validate()) || !s.hasVehicle(w, r) {
 		return
 	}
+	if v.Source != nil {
+		fail(w, 422, "source is managed by the importer")
+		return
+	}
 	v.ID = garage.NewID()
 	v.VehicleID = r.PathValue("id")
 	if err := s.store.SaveEntry(r.Context(), v.ID, v.VehicleID, "reminder", v, true); err != nil {
@@ -250,34 +284,6 @@ func (s *Server) createReminder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	respond(w, 201, v)
-}
-func (s *Server) updateReminder(w http.ResponseWriter, r *http.Request) {
-	data, err := s.store.Entry(r.Context(), r.PathValue("id"), "reminder")
-	if err != nil {
-		s.failure(w, r, err)
-		return
-	}
-	var v garage.Reminder
-	if err = json.Unmarshal(data, &v); err != nil {
-		s.failure(w, r, err)
-		return
-	}
-	var patch struct {
-		Completed *bool `json:"completed"`
-	}
-	if !decode(w, r, &patch) {
-		return
-	}
-	if patch.Completed == nil {
-		fail(w, 422, "completed is required")
-		return
-	}
-	v.Completed = *patch.Completed
-	if err = s.store.SaveEntry(r.Context(), v.ID, v.VehicleID, "reminder", v, false); err != nil {
-		s.failure(w, r, err)
-		return
-	}
-	respond(w, 200, v)
 }
 func (s *Server) createTrip(w http.ResponseWriter, r *http.Request) {
 	var v garage.Trip

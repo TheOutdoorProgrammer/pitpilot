@@ -1,6 +1,6 @@
 # PitPilot for iOS
 
-A native garage journal for a self-hosted PitPilot server. This initial release supports vehicles, service and fuel records, due-date and mileage reminders, and maps of trips already uploaded to the server. It requires iOS 17 or newer.
+A native garage journal for a self-hosted PitPilot server. It supports vehicle history, notes, odometer readings, planned work, recurring reminders, and maps of trips already uploaded to the server. It requires iOS 17 or newer.
 
 ## Build and test
 
@@ -34,6 +34,16 @@ Network operations create W3C trace context for server correlation and emit boun
 ## Release boundaries
 
 - Reminders are visible in the app; push and local notification scheduling are not implemented.
-- Automatic Raspberry Pi and Smartcar ingestion, Pi updates, receipt attachments, LubeLogger migration, and CrewChief AI remain checklist work.
+- Automatic Raspberry Pi and Smartcar ingestion, Pi updates, receipt attachments, and CrewChief AI remain checklist work.
 - Costs use USD, odometers use miles, and fuel quantities use US gallons in this release.
 - UI tests activate a transport stub only in Debug builds with `--ui-testing`. They use separate test Keychain/cache entries. Release builds contain no fixture transport.
+
+## Working with imported history
+
+History searches titles, notes, tags, and custom fields. Filter by record type and open an entry to read its full notes, custom fields, and source reference. Undated notes remain undated and do not display invented mileage or spending. Odometer entries distinguish initial and final readings and retain whether the reading was measured, estimated, or unspecified.
+
+Planned work appears in Upcoming, separately from completed history. Its cost remains an estimate even when its status is marked done. Log a service record separately to record actual work and spending. Editing a record sends only changed fields; imported provenance, links, tags, and untouched precision stay on the server.
+
+Recurring reminders ask for the completion reading or date. Fixed schedules advance one interval from the existing due value, so a missed occurrence may leave the next one overdue. Flexible schedules advance from the completion values. Requests include the expected due values to prevent a retry from completing two occurrences. If the schedule changes elsewhere, review the refreshed reminder before completing it again.
+
+Loaded migration metadata is available in the protected offline cache. Unknown future record kinds remain readable without breaking the whole vehicle history; editing those kinds requires an app update. The app does not import or restore LubeLogger database files itself.

@@ -12,7 +12,9 @@ The planned Raspberry Pi integration includes app-guided setup, offline collecti
 
 Version 0.1.1 fixes cancelled refreshes incorrectly switching the app into offline mode. New refreshes replace older work, while genuine transport failures report a bounded diagnostic category through the authenticated telemetry relay.
 
-Automatic vehicle ingestion, receipt attachments, recurring reminders, push notifications, LubeLogger migration, and CrewChief AI remain unfinished. Existing vehicle integrations should continue running until migration and replacement acceptance checks pass.
+The next release adds [LubeLogger migration](docs/lubelogger-migration.md), undated notes, custom fields, odometer provenance, planned work, metadata-preserving edits, and recurring reminder intervals. Migration uses a typed source snapshot, previews changes, and applies them atomically without duplicating records or overwriting conflicting edits.
+
+Automatic vehicle ingestion, receipt attachments, push notifications, and CrewChief AI remain unfinished. Existing vehicle integrations should continue running until migration and replacement acceptance checks pass.
 
 ## What we're building
 

@@ -96,6 +96,8 @@ Connection recovery: [v0.1.1](https://github.com/TheOutdoorProgrammer/pitpilot/r
 
 ### Migration and interoperability
 
+- [x] Implement typed LiteDB extraction, protected source preservation, preview/apply reconciliation and conflict detection. See [the migration workflow](docs/lubelogger-migration.md) for supported data and explicit blockers.
+- [x] Support undated notes, typed custom fields, estimated odometer readings and planned work in the migration projection and native app.
 - [ ] Import LubeLogger vehicles, record types, attachments, custom fields, units, and relationships with a preview and reconciliation report.
 - [ ] Make imports repeatable without duplicates and report unsupported data before cutover.
 - [ ] Export vehicle records, attachments, and recorded tracks in documented formats.

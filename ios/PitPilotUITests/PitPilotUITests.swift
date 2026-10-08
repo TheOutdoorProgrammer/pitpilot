@@ -76,6 +76,88 @@ final class PitPilotUITests: XCTestCase {
         XCTAssertFalse(app.buttons["Add reminder"].isEnabled)
     }
 
+    func testImportedNoteSearchEditAndMetadata() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-testing", "--ui-testing-migration"]
+        app.launch()
+        connect(app)
+        app.staticTexts["Synthetic route truck"].tap()
+        let information = app.buttons["vehicleInformation"]
+        XCTAssertTrue(information.waitForExistence(timeout: 5))
+        information.tap()
+        XCTAssertTrue(app.staticTexts["SYNTHETIC-VIN"].exists)
+        XCTAssertTrue(app.staticTexts["TEST-ONLY"].exists)
+        XCTAssertTrue(app.staticTexts["Synthetic region"].exists)
+        capture("Imported vehicle metadata", app)
+        information.tap()
+        let search = app.textFields["historySearch"]
+        XCTAssertTrue(search.waitForExistence(timeout: 5))
+        search.tap()
+        search.typeText("collector journal\n")
+        XCTAssertTrue(app.staticTexts["Synthetic collector journal"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.staticTexts["Synthetic daily reading"].exists)
+        app.staticTexts["Synthetic collector journal"].tap()
+        XCTAssertTrue(app.staticTexts["Undated"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.staticTexts["USD"].exists)
+        XCTAssertTrue(app.staticTexts["Migration acceptance note"].exists)
+        capture("Imported undated note", app)
+        app.buttons["Edit record"].tap()
+        let notes = app.descendants(matching: .any).matching(identifier: "recordNotes").firstMatch
+        XCTAssertTrue(notes.waitForExistence(timeout: 5))
+        notes.tap()
+        notes.typeText(" corrected")
+        app.buttons["Save"].tap()
+        let corrected = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "corrected")).firstMatch
+        XCTAssertTrue(corrected.waitForExistence(timeout: 5))
+        app.swipeUp()
+        XCTAssertTrue(app.staticTexts["Synthetic sensor"].exists)
+        XCTAssertTrue(app.staticTexts["Imported from LubeLogger"].exists)
+        capture("Edited imported note with provenance", app)
+    }
+
+    func testImportedReadingPlanAndRecurringReminder() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-testing", "--ui-testing-migration"]
+        app.launch()
+        connect(app)
+        app.staticTexts["Synthetic route truck"].tap()
+        if !app.staticTexts["Synthetic daily reading"].isHittable { app.swipeUp() }
+        XCTAssertTrue(app.staticTexts["Synthetic daily reading"].waitForExistence(timeout: 5))
+        app.staticTexts["Synthetic daily reading"].tap()
+        XCTAssertTrue(app.staticTexts["Estimated reading"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Initial reading"].exists)
+        XCTAssertTrue(app.staticTexts["Final reading"].exists)
+        capture("Imported estimated odometer", app)
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        if !app.buttons["Upcoming"].isHittable { app.swipeDown() }
+        app.buttons["Upcoming"].tap()
+        XCTAssertTrue(app.staticTexts["Synthetic planned repair"].waitForExistence(timeout: 5))
+        app.staticTexts["Synthetic planned repair"].tap()
+        XCTAssertTrue(app.staticTexts["Critical"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Planned"].exists)
+        capture("Imported planned work", app)
+        let linkedReminder = app.buttons["Synthetic recurring oil"]
+        if !linkedReminder.isHittable { app.swipeUp() }
+        XCTAssertTrue(linkedReminder.waitForExistence(timeout: 5))
+        linkedReminder.tap()
+        XCTAssertTrue(app.staticTexts["Due reading"].waitForExistence(timeout: 5))
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        app.swipeUp()
+        let complete = app.buttons["Complete Synthetic recurring oil"]
+        XCTAssertTrue(complete.waitForExistence(timeout: 5))
+        complete.tap()
+        XCTAssertFalse(app.buttons["Complete"].isEnabled)
+        let miles = app.textFields["completionMileage"]
+        miles.tap()
+        miles.typeText("125100")
+        app.buttons["Complete"].tap()
+        XCTAssertTrue(miles.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["At 130,100 mi"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["Complete Synthetic recurring oil"].exists)
+        capture("Recurring reminder advanced once", app)
+    }
+
     private func connect(_ app: XCUIApplication) {
         let button = app.buttons["connectButton"]
         XCTAssertFalse(button.isEnabled)

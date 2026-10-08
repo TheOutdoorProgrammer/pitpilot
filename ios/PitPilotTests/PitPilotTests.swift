@@ -36,8 +36,81 @@ final class PitPilotTests: XCTestCase {
     func testTelemetryUsesBoundedOperationsWithoutIDs() {
         XCTAssertEqual(APIClient.operation(route: "vehicles/private-id/records", method: "GET"), "records.list")
         XCTAssertEqual(APIClient.operation(route: "records/private-id", method: "DELETE"), "record.delete")
+        XCTAssertEqual(APIClient.operation(route: "records/private-id", method: "PATCH"), "record.update")
         XCTAssertNil(APIClient.operation(route: "client-events", method: "POST"))
         XCTAssertNil(APIClient.operation(route: "unknown/private-id", method: "GET"))
+    }
+
+    func testUnknownRecordKindDoesNotBreakHistoryOrCache() throws {
+        let data = Data(#"[{"id":"future","vehicleId":"v","kind":"inspection","date":"2026-10-08","title":"Future record","notes":"Still readable","odometerMiles":120000,"costCents":0}]"#.utf8)
+        let records = try JSONDecoder().decode([VehicleRecord].self, from: data)
+        XCTAssertEqual(records.count, 1)
+        XCTAssertEqual(records[0].kind.rawValue, "inspection")
+        XCTAssertFalse(records[0].kind.isSupported)
+        let roundTrip = try JSONDecoder().decode([VehicleRecord].self, from: JSONEncoder().encode(records))
+        XCTAssertEqual(roundTrip[0].kind.rawValue, "inspection")
+    }
+
+    func testUndatedImportedNoteRoundTripsAndEditsWithoutInventingValues() throws {
+        let vehicle = try JSONDecoder().decode(Vehicle.self, from: Data(#"{"id":"v","name":"Synthetic vehicle","make":"","model":"","year":2002,"odometerMiles":120000,"createdAt":"2026-01-01T00:00:00Z","vin":"SYNTHETIC-VIN","licensePlate":"TEST-ONLY","notes":"Original vehicle note","extraFields":[{"name":"Region","value":"Synthetic region","isRequired":false,"fieldType":0}],"source":{"system":"lubelogger","instance":"synthetic","collection":"vehicles","id":"1"}}"#.utf8))
+        let cachedVehicle = try JSONDecoder().decode(Vehicle.self, from: JSONEncoder().encode(vehicle))
+        XCTAssertEqual(cachedVehicle.vin, "SYNTHETIC-VIN")
+        XCTAssertEqual(cachedVehicle.licensePlate, "TEST-ONLY")
+        XCTAssertEqual(cachedVehicle.notes, "Original vehicle note")
+        XCTAssertEqual(cachedVehicle.extraFields?.first?.value, "Synthetic region")
+        XCTAssertEqual(cachedVehicle.source?.collection, "vehicles")
+        let record = try JSONDecoder().decode(VehicleRecord.self, from: Data(#"{"id":"n","vehicleId":"v","kind":"note","date":"","title":"Collector journal","notes":"First line\nSecond line","odometerMiles":0,"costCents":0,"pinned":true,"tags":["collector"],"extraFields":[{"name":"Sensor","value":"7.25","isRequired":false,"fieldType":2}],"source":{"system":"lubelogger","instance":"synthetic","collection":"notes","id":"12"}}"#.utf8))
+        let cached = try JSONDecoder().decode(VehicleRecord.self, from: JSONEncoder().encode(record))
+        XCTAssertEqual(cached.dateLabel, "Undated")
+        XCTAssertFalse(cached.kind.hasCost)
+        XCTAssertFalse(cached.kind.hasOdometer)
+        XCTAssertEqual(cached.tags, ["collector"])
+        XCTAssertEqual(cached.extraFields?.first?.fieldType, 2)
+        XCTAssertEqual(cached.source?.id, "12")
+        XCTAssertTrue(cached.matches("second line"))
+        XCTAssertTrue(cached.matches("sensor"))
+        var draft = RecordDraft(record: cached, mileage: 999)
+        XCTAssertTrue(try draft.values(original: cached).isEmpty)
+        draft.notes += "\nCorrection"
+        let patch = try draft.values(original: cached)
+        XCTAssertEqual(Set(patch.keys), ["notes"])
+        XCTAssertEqual(patch["notes"] as? String, "First line\nSecond line\nCorrection")
+    }
+
+    func testRecordEditingPreservesPrecisionAndPlanRelationships() throws {
+        let fuel = VehicleRecord(id: "f", vehicleId: "v", kind: .fuel, date: "2026-10-08", title: "Fuel", notes: "", odometerMiles: 123456.123456789, costCents: 1001, gallons: 11.123456789)
+        var fuelDraft = RecordDraft(record: fuel, mileage: 0)
+        fuelDraft.title = "Receipt corrected"
+        XCTAssertEqual(Set(try fuelDraft.values(original: fuel).keys), ["title"])
+        fuelDraft.cost = "10.23"
+        XCTAssertEqual(try fuelDraft.values(original: fuel)["costCents"] as? Int, 1023)
+        XCTAssertNil(Input.moneyCents("10.239"))
+        XCTAssertNil(Input.moneyCents("-1"))
+        XCTAssertEqual(Input.moneyCents(Input.moneyText(999_999_999)), 999_999_999)
+        let plan = VehicleRecord(id: "p", vehicleId: "v", kind: .plan, date: "", title: "Planned repair", notes: "", odometerMiles: 0, costCents: 5000, plan: PlannedWork(status: "planned", priority: "critical", recordKind: "repair", createdAt: "2026-01-01T00:00:00Z", reminderIds: ["linked-reminder"]))
+        var planDraft = RecordDraft(record: plan, mileage: 0)
+        planDraft.planStatus = "in-progress"
+        let patch = try planDraft.values(original: plan)
+        XCTAssertEqual(Set(patch.keys), ["plan"])
+        let details = try XCTUnwrap(patch["plan"] as? [String: Any])
+        XCTAssertEqual(Set(details.keys), ["status"])
+        XCTAssertEqual(details["status"] as? String, "in-progress")
+    }
+
+    func testImportedReadingsAndReminderRecurrenceSurviveCache() throws {
+        let record = try JSONDecoder().decode(VehicleRecord.self, from: Data(#"{"id":"o","vehicleId":"v","kind":"odometer","date":"2026-10-08","title":"Daily reading","notes":"Estimated from collector","odometerMiles":145100.25,"initialOdometerMiles":145000,"odometerStatus":"estimated","costCents":0,"extraFields":[{"name":"Battery","value":"12.4","isRequired":false,"fieldType":2}]}"#.utf8))
+        XCTAssertEqual(record.readingLabel, "Estimated reading")
+        XCTAssertFalse(record.kind.hasCost)
+        var draft = RecordDraft(record: record, mileage: 0)
+        draft.extraFields[0].value = "12.5"
+        let patch = try draft.values(original: record)
+        XCTAssertEqual(Set(patch.keys), ["extraFields"])
+        let reminder = try JSONDecoder().decode(Reminder.self, from: Data(#"{"id":"r","vehicleId":"v","title":"Oil","dueOdometerMiles":150000,"completed":false,"notes":"Preserved","recurrence":{"miles":5000,"fixedIntervals":true},"thresholds":{"urgentMiles":500,"veryUrgentMiles":100}}"#.utf8))
+        let cached = try JSONDecoder().decode(Reminder.self, from: JSONEncoder().encode(reminder))
+        XCTAssertEqual(cached.recurrence?.miles, 5000)
+        XCTAssertEqual(cached.recurrence?.fixedIntervals, true)
+        XCTAssertEqual(cached.thresholds?.urgentMiles, 500)
+        XCTAssertEqual(cached.notes, "Preserved")
     }
     func testCachedGarageIsBoundToServerAndToken() throws {
         let first = try Connection.validated(server: "https://first.example.com", token: "first-token")

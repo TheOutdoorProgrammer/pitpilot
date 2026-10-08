@@ -48,7 +48,7 @@ func Open(filename string) (*Store, error) {
 		db.Close()
 		return nil, err
 	}
-	if version > 1 {
+	if version > 2 {
 		db.Close()
 		return nil, errors.New("database schema is newer than this server")
 	}
@@ -58,6 +58,16 @@ func Open(filename string) (*Store, error) {
 		CREATE TABLE entries(id TEXT PRIMARY KEY, vehicle_id TEXT NOT NULL REFERENCES vehicles(id) ON DELETE CASCADE, kind TEXT NOT NULL CHECK(kind IN ('record','reminder','trip')), data TEXT NOT NULL CHECK(json_valid(data)));
 		CREATE INDEX entries_vehicle_kind ON entries(vehicle_id,kind);
 		PRAGMA user_version=1;
+		COMMIT;`)
+		if err != nil {
+			db.Close()
+			return nil, err
+		}
+	}
+	if version < 2 {
+		_, err = db.Exec(`BEGIN;
+		CREATE TABLE import_sources(source TEXT NOT NULL, collection TEXT NOT NULL, source_id TEXT NOT NULL, target_id TEXT NOT NULL UNIQUE, target_kind TEXT NOT NULL, source_hash TEXT NOT NULL, target_hash TEXT NOT NULL, raw TEXT NOT NULL CHECK(json_valid(raw)), PRIMARY KEY(source,collection,source_id));
+		PRAGMA user_version=2;
 		COMMIT;`)
 		if err != nil {
 			db.Close()
@@ -246,12 +256,24 @@ type Export struct {
 	Records       []json.RawMessage `json:"records"`
 	Reminders     []json.RawMessage `json:"reminders"`
 	Trips         []json.RawMessage `json:"trips"`
+	ImportSources []ImportedSource  `json:"importSources"`
+}
+
+type ImportedSource struct {
+	Source     string          `json:"source"`
+	Collection string          `json:"collection"`
+	SourceID   string          `json:"sourceId"`
+	TargetID   string          `json:"targetId"`
+	TargetKind string          `json:"targetKind"`
+	SourceHash string          `json:"sourceHash"`
+	TargetHash string          `json:"targetHash"`
+	Raw        json.RawMessage `json:"raw"`
 }
 
 func (s *Store) Export(ctx context.Context) (out Export, err error) {
 	ctx, done := operation(ctx, "db.export")
 	defer func() { done(err) }()
-	out = Export{SchemaVersion: 1, ExportedAt: time.Now().UTC(), Vehicles: []json.RawMessage{}, Records: []json.RawMessage{}, Reminders: []json.RawMessage{}, Trips: []json.RawMessage{}}
+	out = Export{SchemaVersion: 2, ExportedAt: time.Now().UTC(), Vehicles: []json.RawMessage{}, Records: []json.RawMessage{}, Reminders: []json.RawMessage{}, Trips: []json.RawMessage{}, ImportSources: []ImportedSource{}}
 	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
 		return out, err
@@ -284,6 +306,25 @@ func (s *Store) Export(ctx context.Context) (out Export, err error) {
 	}
 	err = rows.Err()
 	rows.Close()
+	if err != nil {
+		return out, err
+	}
+	imports, err := tx.QueryContext(ctx, "SELECT source,collection,source_id,target_id,target_kind,source_hash,target_hash,raw FROM import_sources ORDER BY source,collection,source_id")
+	if err != nil {
+		return out, err
+	}
+	for imports.Next() {
+		var v ImportedSource
+		var raw []byte
+		if err = imports.Scan(&v.Source, &v.Collection, &v.SourceID, &v.TargetID, &v.TargetKind, &v.SourceHash, &v.TargetHash, &raw); err != nil {
+			imports.Close()
+			return out, err
+		}
+		v.Raw = json.RawMessage(raw)
+		out.ImportSources = append(out.ImportSources, v)
+	}
+	err = imports.Err()
+	imports.Close()
 	if err != nil {
 		return out, err
 	}

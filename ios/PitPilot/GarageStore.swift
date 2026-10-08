@@ -217,12 +217,30 @@ final class GarageStore: ObservableObject {
         persist()
     }
 
+    func updateRecord(_ record: VehicleRecord, values: [String: Any]) async throws {
+        guard let client else { throw APIError.message("Connect to your server first.") }
+        let updated: VehicleRecord = try await client.request("records/\(record.id)", method: "PATCH", body: APIClient.body(values))
+        guard isCurrent(client) else { return }
+        if let index = cache.details[record.vehicleId]?.records.firstIndex(where: { $0.id == record.id }) {
+            cache.details[record.vehicleId]?.records[index] = updated
+        }
+        persist()
+    }
+
+    func updateReminder(_ reminder: Reminder, values: [String: Any]) async throws {
+        guard let client else { throw APIError.message("Connect to your server first.") }
+        let updated: Reminder = try await client.request("reminders/\(reminder.id)", method: "PATCH", body: APIClient.body(values))
+        guard isCurrent(client) else { return }
+        if let index = cache.details[reminder.vehicleId]?.reminders.firstIndex(where: { $0.id == reminder.id }) {
+            cache.details[reminder.vehicleId]?.reminders[index] = updated
+        }
+        persist()
+    }
+
     func complete(_ reminder: Reminder) async {
         guard let client else { return }
         do {
-            let _: Reminder = try await client.request("reminders/\(reminder.id)", method: "PATCH", body: APIClient.body(["completed": !reminder.completed]))
-            guard isCurrent(client) else { return }
-            await refreshDetail(reminder.vehicleId)
+            try await updateReminder(reminder, values: ["completed": !reminder.completed])
         } catch { if isCurrent(client) { self.error = error.localizedDescription } }
     }
 
