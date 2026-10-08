@@ -1,10 +1,10 @@
 # PitPilot
 
-Vehicle maintenance, trip history, and connected vehicle data, with a Go backend and a native iOS app.
+Vehicle maintenance and connected vehicle data, with a Go backend, native iOS app, and the picollector Raspberry Pi collector.
 
-PitPilot brings maintenance records, driving history and vehicle measurements into one application, with a native garage and a persistent Go API. Built-in Smartcar and Raspberry Pi collection are planned next; the full replacement scope is tracked in the [feature checklist](FEATURES.md).
+PitPilot brings maintenance records, driving history and vehicle measurements into one application, with a native garage and a persistent Go API. Built-in Smartcar and Raspberry Pi collection share the same measurement history. The full replacement scope is tracked in the [feature checklist](FEATURES.md).
 
-The planned Raspberry Pi integration includes app-guided setup, offline collection, and automatic signed updates with rollback. Routine setup and troubleshooting should not require SSH.
+The Raspberry Pi collector pairs to a vehicle from the app, queues observations offline, and installs signed automatic updates with health rollback. Initial Linux installation and OBD adapter setup require administrator access; the app handles pairing, status, revocation, and pausing updates. See [collector setup](docs/picollector.md) and [Smartcar configuration](docs/smartcar.md).
 
 ## Status
 
@@ -16,7 +16,7 @@ The iOS app stores its access token in Keychain and caches records and loaded me
 
 The release includes the cancellation fix from 0.1.1. New refreshes replace older work, while genuine transport failures report a bounded diagnostic category through the authenticated telemetry relay.
 
-Automatic vehicle ingestion, receipt attachments, push notifications, and CrewChief AI remain unfinished. Existing vehicle integrations should continue running until migration and replacement acceptance checks pass.
+Automatic trip recording, receipt attachments, push notifications, and CrewChief AI remain unfinished. Existing vehicle integrations should continue running until the collector handoff, Smartcar vehicle compatibility, and replacement acceptance checks pass.
 
 ## What we're building
 
@@ -28,7 +28,7 @@ Automatic vehicle ingestion, receipt attachments, push notifications, and CrewCh
 
 Every reading should identify its source and when it was observed. Estimated mileage, inferred fuel-ups, and suggested maintenance must remain distinguishable from measured data and confirmed records.
 
-The [vehicle measurements guide](docs/vehicle-signals.md) documents native signal ingestion, dashboard history, private OpenMetrics scraping and conversion of generated summaries. The ingestion contract is shared by Pi and Smartcar adapters; built-in setup and authorization flows remain unfinished.
+The [vehicle measurements guide](docs/vehicle-signals.md) documents native signal ingestion, dashboard history, private OpenMetrics scraping and conversion of generated summaries. Pi and Smartcar adapters preserve actual measurement times, units and source identity. Missing readings remain unavailable, and estimated values remain labeled.
 
 ## CrewChief AI
 
@@ -42,7 +42,7 @@ The proposed product split keeps ordinary recordkeeping, device ingestion, maps,
 
 The backend uses Go and SQLite. Deploy one replica with a persistent volume; the API accepts a high-entropy household token. The native app uses SwiftUI and MapKit. See the [API contract](docs/api.md) and [architecture decision](adr/0001-start-with-a-single-household-go-service-and-native-ios-clie.md).
 
-The initial authentication model grants access to the whole household. Per-person accounts and vehicle permissions remain planned. A future Raspberry Pi collector will upload authenticated observations; existing collection code will be evaluated for reuse before that implementation begins.
+The household authentication model grants access to the whole garage. Per-person accounts and vehicle permissions remain planned. Collectors use separate, revocable credentials that can only upload to their paired vehicle. Smartcar application credentials stay on the server; the native app uses its authorization session and explicit vehicle selection.
 
 ## Run the backend
 

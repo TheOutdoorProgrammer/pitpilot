@@ -27,6 +27,10 @@ func Start(ctx context.Context, version string) (*slog.Logger, func(context.Cont
 }
 
 func StartTo(ctx context.Context, version string, output io.Writer) (*slog.Logger, func(context.Context) error, error) {
+	return StartToNamed(ctx, "pitpilot", version, output)
+}
+
+func StartToNamed(ctx context.Context, service, version string, output io.Writer) (*slog.Logger, func(context.Context) error, error) {
 	console := slog.NewJSONHandler(output, nil)
 	logger := slog.New(correlated{handlers: []slog.Handler{console}})
 	shutdown := func(context.Context) error { return nil }
@@ -34,7 +38,7 @@ func StartTo(ctx context.Context, version string, output io.Writer) (*slog.Logge
 	if os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT") == "" || os.Getenv("OTEL_SDK_DISABLED") == "true" {
 		return logger, shutdown, nil
 	}
-	res, err := resource.New(ctx, resource.WithFromEnv(), resource.WithTelemetrySDK(), resource.WithAttributes(attribute.String("service.name", "pitpilot"), attribute.String("service.version", version)))
+	res, err := resource.New(ctx, resource.WithFromEnv(), resource.WithTelemetrySDK(), resource.WithAttributes(attribute.String("service.name", service), attribute.String("service.version", version)))
 	if err != nil {
 		return nil, nil, err
 	}

@@ -1,0 +1,10 @@
+{
+  "server": "https://pitpilot.example.com",
+  "serialPort": "/dev/rfcomm0",
+  "baud": 115200,
+  "pollSeconds": 10,
+  "queueLimit": 100000,
+  "stateDirectory": "/var/lib/pitpilot-collector",
+  "timeSyncMarker": "/run/systemd/timesync/synchronized",
+  "updateManifestUrl": "https://github.com/TheOutdoorProgrammer/pitpilot/releases/latest/download/picollector_linux_arm64.update.json"
+}

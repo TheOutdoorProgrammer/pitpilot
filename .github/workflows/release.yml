@@ -116,6 +116,15 @@ jobs:
       - uses: docker/setup-qemu-action@v3
         with:
           platforms: arm64
+      - name: Prepare collector release signing
+        env:
+          COLLECTOR_SIGNING_KEY: ${{ secrets.PITPILOT_COLLECTOR_SIGNING_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$COLLECTOR_SIGNING_KEY"
+          umask 077
+          printf '%s' "$COLLECTOR_SIGNING_KEY" > "$RUNNER_TEMP/pitpilot-collector-signing-key"
+          printf 'PITPILOT_COLLECTOR_SIGNING_KEY_FILE=%s/pitpilot-collector-signing-key\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
       - id: quill
         uses: TheOutdoorProgrammer/quill@v1
         with:
@@ -135,3 +144,6 @@ jobs:
           docker-provenance: mode=max
           fledge-fail-on-development-signing: true
           fledge-secure: true
+      - name: Remove collector signing material
+        if: always()
+        run: rm -f "$RUNNER_TEMP/pitpilot-collector-signing-key"

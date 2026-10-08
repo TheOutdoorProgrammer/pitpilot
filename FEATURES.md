@@ -34,7 +34,7 @@ Connection recovery: [v0.1.1](https://github.com/TheOutdoorProgrammer/pitpilot/r
 - [ ] Confirm which capabilities are included without an AI subscription, including self-hosting and native app distribution.
 - [ ] Identify supported vehicle, OBD adapter, Raspberry Pi, GPS, and iOS combinations through testing.
 - [ ] Audit current LubeLogger features and export formats; map every feature to a checklist item or an explicitly agreed exclusion.
-- [ ] Evaluate existing Go collectors and integrations for reuse, including licensing and separation from deployment-specific configuration.
+- [x] Evaluate existing Go collectors and integrations for reuse, including licensing and separation from deployment-specific configuration. See [collector notices](deploy/picollector/THIRD-PARTY-NOTICES.txt) and [integration architecture](adr/0004-use-scoped-collectors-and-application-owned-smartcar-connect.md).
 
 ## Replacement baseline
 
@@ -74,31 +74,37 @@ Native measurements were introduced in [v0.3.0](https://github.com/TheOutdoorPro
 
 Fresh screenshots verified dense fuel trends, visible count bars, boolean and code lanes, readable date labels, range details, offline history, and landscape capture. Physical-device validation of the updated charts remains pending. A single-day aggregate can repeat its date across several ticks; its full period times remain available in the details.
 
-Deployed acceptance verified ingestion, retry and conflict behavior, preserved history ranges, valid zero readings, independent scraper authorization, and correlated operational telemetry. Generated-note conversion passed source reconciliation and preservation checks; repeat conversion had no work, and a restored backup skipped unchanged source imports without recreating notes. The common ingestion API is ready for adapters; built-in Pi enrollment, Smartcar authorization and existing collector cutover remain separate work below.
+Deployed acceptance verified ingestion, retry and conflict behavior, preserved history ranges, valid zero readings, independent scraper authorization, and correlated operational telemetry. Generated-note conversion passed source reconciliation and preservation checks; repeat conversion had no work, and a restored backup skipped unchanged source imports without recreating notes. Built-in adapters and their separate live acceptance requirements are tracked below.
 
 ### Raspberry Pi integration
 
 - [ ] Install and enroll a collector through a documented, repeatable process; validate app-guided provisioning.
-- [ ] Pair a device with an account and vehicle using revocable credentials.
+- [x] Pair a device with the household and vehicle using single-use enrollment and revocable, vehicle-scoped credentials.
 - [ ] Discover and pair supported OBD adapters, showing which readings the vehicle supports.
-- [ ] Collect vehicle observations with timestamps, units, source identity, and recording coverage.
+- [x] Collect vehicle observations with timestamps, units, source identity, and explicit clock-related sampling gaps.
 - [ ] Configure supported connectivity options through guided setup and test reconnect behavior.
-- [ ] Persist observations offline and upload them with retry, acknowledgement, and duplicate prevention.
+- [x] Persist observations offline and upload them with retry, acknowledgement, and duplicate prevention, including independent delivery to an existing receiver.
 - [ ] Recover from power loss, intermittent adapters, incorrect clocks, and exhausted local storage without silently losing acknowledged data.
 - [ ] Show connection state, queued data, last observation, last upload, and actionable recovery guidance in the app.
-- [ ] Let the Pi automatically check for, download, verify, and install signed collector releases without SSH or manual installation, with compatibility checks before activation.
-- [ ] Preserve queued observations and configuration during automatic updates; recover from interrupted installation and automatically roll back if the updated collector fails its health checks.
-- [ ] Show the installed version, update status, and failures in the app, with controls to pause automatic updates or retry a failed update.
+- [x] Let an enrolled Pi check for, download, verify, and install signed collector releases, with compatibility and health checks before acceptance.
+- [x] Preserve queued observations and configuration during automatic updates; recover from interrupted activation through a separate trusted updater and roll back failed health checks.
+- [ ] Verify native version, update status, failures, and pause controls on a physical collector; add an explicit retry control for failed updates.
 - [ ] Provide useful diagnostics without exposing credentials, location history, or personal records in operational logs.
 
 ### Smartcar integration
 
 - [ ] Connect, assign, reconnect, and disconnect a vehicle through Smartcar's supported authorization flow.
 - [ ] Discover supported signals and show unavailable, stale, or delayed data clearly.
+- [x] Implement application-owned Connect sessions, explicit vehicle binding, reconnect, local detach, and encrypted private integration storage, with provider fixtures and API regression coverage.
+- [x] Reconcile current signals with durable polling leases, idempotent observations, throttling, and retry deadlines.
 - [ ] Authenticate incoming updates, handle retries and duplicates, and recover from missed deliveries.
-- [ ] Normalize vehicle data while preserving source values, units, and observation timestamps.
+- [x] Normalize supported vehicle signals while preserving source units and actual OEM observation timestamps; reject unavailable or untimed readings.
 - [ ] Turn supported observations into mileage updates and reviewable suggestions; inferred events must not silently become confirmed purchases or completed work.
 - [ ] Validate actual signal availability, location cadence, connectivity requirements, and operating costs on supported vehicles.
+
+The [collector tests](internal/picollector) cover durable dual delivery, rejected empty observations, clock gating, revocation, signed artifact validation, interrupted activation, and rollback after multiple upgrades. The initial profile is read-only J1850 VPW over an already configured serial/RFCOMM adapter. Physical power-loss recovery, guided Bluetooth/network setup, and exclusive handoff from an existing reader remain acceptance work. See [collector setup](docs/picollector.md).
+
+[Smartcar tests](internal/smartcar) cover authorization ownership, reconnect preservation, missing timestamps, unsupported signals, provider failures, and bounded reconciliation. Live connection requires the operator's application UUID, mounted credentials, and valid OEM consent. Polling does not implement webhooks or reconstruct driven routes. See [Smartcar setup](docs/smartcar.md).
 
 ### Trip history and maps
 

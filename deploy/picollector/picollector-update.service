@@ -1,0 +1,22 @@
+[Unit]
+Description=Verify and apply signed PitPilot collector updates
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+ExecStart=/opt/pitpilot/picollector/updater update --config /etc/pitpilot/collector.json
+EnvironmentFile=-/etc/pitpilot/telemetry.env
+TimeoutStartSec=300
+UMask=0077
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+ReadWritePaths=/opt/pitpilot/picollector /var/lib/pitpilot-updater

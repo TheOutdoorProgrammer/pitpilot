@@ -1,0 +1,28 @@
+[Unit]
+Description=PitPilot read-only OBD collector
+After=network.target bluetooth.service
+
+[Service]
+Type=simple
+User=pitpilot-collector
+Group=pitpilot-collector
+SupplementaryGroups=dialout
+ExecStart=/opt/pitpilot/picollector/current run --config /etc/pitpilot/collector.json
+EnvironmentFile=-/etc/pitpilot/telemetry.env
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=30
+UMask=0077
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+ReadWritePaths=/var/lib/pitpilot-collector
+
+[Install]
+WantedBy=multi-user.target

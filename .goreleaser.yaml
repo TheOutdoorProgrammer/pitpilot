@@ -12,6 +12,20 @@ builds:
     ldflags:
       - -s -w -X main.version={{ .Version }} -X main.commit={{ .FullCommit }}
     mod_timestamp: "{{ .CommitTimestamp }}"
+  - id: picollector
+    main: ./cmd/picollector
+    binary: picollector
+    env: [CGO_ENABLED=0]
+    goos: [linux]
+    goarch: [amd64, arm64]
+    flags: [-trimpath]
+    ldflags:
+      - -s -w -X main.version={{ .Version }} -X main.commit={{ .FullCommit }} -X main.updatePublicKey=t5Yj66jA1kMAZhXFuaoEf/O7RYKBkrAG8SPFmMYQqwA=
+    mod_timestamp: "{{ .CommitTimestamp }}"
+    hooks:
+      post:
+        - cmd: go run ./cmd/collector-release --binary {{ .Path }} --arch {{ .Arch }} --version {{ .Version }} --snapshot={{ .IsSnapshot }} --public-key t5Yj66jA1kMAZhXFuaoEf/O7RYKBkrAG8SPFmMYQqwA=
+          env: [GOOS=, GOARCH=]
 
 archives:
   - id: pitpilot
@@ -28,12 +42,31 @@ archives:
       - tools/lubelogger-extract/README.md
       - tools/lubelogger-extract/THIRD-PARTY-NOTICES.txt
       - tools/lubelogger-extract/*.sb
+  - id: picollector
+    ids: [picollector]
+    formats: [binary]
+    name_template: "picollector_{{ .Os }}_{{ .Arch }}"
+  - id: picollector-install
+    ids: [picollector]
+    formats: [tar.gz]
+    name_template: "picollector_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - docs/picollector.md
+      - docs/device-api.md
+      - deploy/picollector/*
+      - scripts/picollector-install.sh
 
 checksum:
   name_template: checksums.txt
+  extra_files:
+    - glob: dist/picollector_*/picollector_*.update.json
 
 changelog:
   use: github-native
 
 release:
   prerelease: auto
+  extra_files:
+    - glob: dist/picollector_*/picollector_*.update.json
+    - glob: deploy/picollector/*
+    - glob: docs/picollector.md
