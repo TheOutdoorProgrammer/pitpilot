@@ -25,6 +25,8 @@ Release validation: [v0.1.0](https://github.com/TheOutdoorProgrammer/pitpilot/re
 
 Deployment validation: the immutable release passed HTTPS and authentication checks after Flux reconciliation. A synthetic vehicle and service record survived replacement of the running pod, then were removed. Grafana received correlated request, datastore, and native-relay observations with version 0.1.0 and route templates. Inspected trace attributes and log fields contained no record identifiers, coordinates, bodies, credentials, or query strings. The native relay was exercised with a synthetic client event; a physical phone session has not been verified. Retained local storage is not an off-node backup.
 
+Connection recovery: [v0.1.1](https://github.com/TheOutdoorProgrammer/pitpilot/releases/tag/v0.1.1) preserves cached data and connection state when a refresh is cancelled, and prevents stale refreshes from overwriting newer results. Eight new regression tests cover cancellation, replacement refresh ownership, real offline failures, and recovery. All 14 unit tests and both UI journeys passed on the self-hosted runner in [CI](https://github.com/TheOutdoorProgrammer/pitpilot/actions/runs/37819513238) and [release](https://github.com/TheOutdoorProgrammer/pitpilot/actions/runs/37820884786). The signed Fledge build is version 0.1.1, build 2. A device update is required to receive this fix.
+
 ## Product decisions
 
 - [x] Confirm PitPilot, paid CrewChief AI, and repository ownership under TheOutdoorProgrammer.

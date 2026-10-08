@@ -8,7 +8,9 @@ The planned Raspberry Pi integration includes app-guided setup, offline collecti
 
 ## Status
 
-[The first release, v0.1.0](https://github.com/TheOutdoorProgrammer/pitpilot/releases/tag/v0.1.0), supports vehicles, service and fuel records, reminders, recorded-trip display, and JSON export. The iOS app stores its access token in Keychain and caches records for offline reading. It does not queue offline changes. Signed test builds are distributed through Fledge to devices included in the provisioning profile.
+[The current release, v0.1.1](https://github.com/TheOutdoorProgrammer/pitpilot/releases/tag/v0.1.1), supports vehicles, service and fuel records, reminders, recorded-trip display, and JSON export. The iOS app stores its access token in Keychain and caches records for offline reading. It does not queue offline changes. Signed test builds are distributed through Fledge to devices included in the provisioning profile.
+
+Version 0.1.1 fixes cancelled refreshes incorrectly switching the app into offline mode. New refreshes replace older work, while genuine transport failures report a bounded diagnostic category through the authenticated telemetry relay.
 
 Automatic vehicle ingestion, receipt attachments, recurring reminders, push notifications, LubeLogger migration, and CrewChief AI remain unfinished. Existing vehicle integrations should continue running until migration and replacement acceptance checks pass.
 
