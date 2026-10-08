@@ -65,6 +65,84 @@ func TestManifestTrustPlatformExpiryAndStableVersion(t *testing.T) {
 	}
 }
 
+func TestPublicUpdateRedirectAllowsSignedQueryOnlyOverHTTPS(t *testing.T) {
+	var origin string
+	requests := 0
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		if r.Header.Get("Authorization") != "" {
+			t.Error("public download sent credentials")
+		}
+		if r.URL.Path == "/manifest" {
+			http.Redirect(w, r, origin+"/asset?sv=2026-01-01&sig=fixture%2Fsignature&expires=1799999999", http.StatusFound)
+			return
+		}
+		if r.URL.Path != "/asset" || r.URL.Query().Get("sig") != "fixture/signature" {
+			t.Error("signed query was lost")
+		}
+		_, _ = io.WriteString(w, "verified public fixture")
+	}))
+	defer server.Close()
+	origin = server.URL
+	client := publicClient()
+	client.Transport = server.Client().Transport
+	u := &Updater{Client: client}
+	raw, err := u.fetch(context.Background(), origin+"/manifest", 128)
+	if err != nil || string(raw) != "verified public fixture" || requests != 2 {
+		t.Fatalf("signed redirect failed: requests=%d error=%v", requests, err)
+	}
+	if _, err := endpoint(origin+"/asset?sig=fixture", false); err == nil {
+		t.Fatal("authenticated endpoint rules were relaxed")
+	}
+}
+
+func TestPublicUpdateRedirectRejectsUnsafeDestinationsAndLoops(t *testing.T) {
+	for _, name := range []string{"downgrade", "credentials", "fragment", "loop"} {
+		t.Run(name, func(t *testing.T) {
+			var location string
+			requests := 0
+			server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				requests++
+				http.Redirect(w, r, location, http.StatusFound)
+			}))
+			defer server.Close()
+			switch name {
+			case "downgrade":
+				location = strings.Replace(server.URL, "https://", "http://", 1) + "/asset?sig=fixture"
+			case "credentials":
+				location = strings.Replace(server.URL, "https://", "https://user:fixture@", 1) + "/asset?sig=fixture"
+			case "fragment":
+				location = server.URL + "/asset?sig=fixture#fragment"
+			case "loop":
+				location = server.URL + "/again?sig=fixture"
+			}
+			client := publicClient()
+			client.Transport = server.Client().Transport
+			u := &Updater{Client: client}
+			if _, err := u.fetch(context.Background(), server.URL, 128); err == nil {
+				t.Fatal("unsafe redirect accepted")
+			}
+			if (name == "loop" && requests != 5) || (name != "loop" && requests != 1) {
+				t.Fatalf("unexpected redirect request count %d", requests)
+			}
+		})
+	}
+}
+
+func TestPublishedGitHubAssetDownload(t *testing.T) {
+	if os.Getenv("PITPILOT_VERIFY_PUBLIC_ASSET") != "1" {
+		t.Skip("explicit read-only public release verification")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	u := &Updater{Client: publicClient()}
+	raw, err := u.fetch(ctx, "https://github.com/TheOutdoorProgrammer/pitpilot/releases/download/v0.3.1/checksums.txt", 64<<10)
+	if err != nil || !bytes.Contains(raw, []byte("pitpilot_0.3.1_linux_arm64.tar.gz")) {
+		t.Fatalf("published checksum download failed: %v", err)
+	}
+	t.Logf("downloaded published checksums through HTTPS release redirects (%d bytes)", len(raw))
+}
+
 type transportFunc func(*http.Request) (*http.Response, error)
 
 func (f transportFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }

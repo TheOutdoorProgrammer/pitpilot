@@ -121,8 +121,12 @@ func publicClient() *http.Client {
 		if len(via) >= 5 {
 			return errors.New("too many redirects")
 		}
-		_, err := endpoint(r.URL.String(), false)
-		return err
+		// Release CDNs authorize public downloads with signed query parameters.
+		// This client never carries device credentials; authenticated requests use a separate client.
+		if r.URL.Scheme != "https" || r.URL.Host == "" || r.URL.User != nil || r.URL.Fragment != "" || r.URL.Opaque != "" {
+			return errors.New("unsafe update redirect")
+		}
+		return nil
 	}}
 }
 func (u *Updater) save(state UpdateState) error {
