@@ -101,7 +101,19 @@ func run() error {
 			return errors.New("metrics token file must contain at least 32 random characters")
 		}
 	}
-	handler, err := api.NewWithOptions(store, token, logger, api.Options{MetricsToken: metricsToken})
+	smartcarService, err := configuredSmartcar(store, logger)
+	if err != nil {
+		return err
+	}
+	workerCtx, stopWorkers := context.WithCancel(ctx)
+	workersDone := make(chan struct{})
+	if smartcarService != nil {
+		go func() { defer close(workersDone); smartcarService.Run(workerCtx) }()
+	} else {
+		close(workersDone)
+	}
+	defer func() { stopWorkers(); <-workersDone }()
+	handler, err := api.NewWithOptions(store, token, logger, api.Options{MetricsToken: metricsToken, Smartcar: smartcarService})
 	if err != nil {
 		return err
 	}

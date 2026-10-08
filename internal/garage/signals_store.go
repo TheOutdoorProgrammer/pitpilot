@@ -33,7 +33,7 @@ func initializeSignals(db *sql.DB) error {
  CREATE INDEX IF NOT EXISTS signals_history ON signals(vehicle_id,metric,statistic,sort_time);
  CREATE TABLE IF NOT EXISTS signal_contexts(vehicle_id TEXT NOT NULL REFERENCES vehicles(id) ON DELETE CASCADE, source TEXT NOT NULL, key TEXT NOT NULL, kind TEXT NOT NULL, sort_time INTEGER NOT NULL, data TEXT NOT NULL CHECK(json_valid(data)), PRIMARY KEY(vehicle_id,source,key));
  CREATE TABLE IF NOT EXISTS signal_batches(vehicle_id TEXT NOT NULL REFERENCES vehicles(id) ON DELETE CASCADE, source TEXT NOT NULL, batch_id TEXT NOT NULL, hash TEXT NOT NULL, PRIMARY KEY(vehicle_id,source,batch_id));
- PRAGMA user_version=3; COMMIT;`)
+ COMMIT;`)
 	return err
 }
 

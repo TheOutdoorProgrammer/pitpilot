@@ -48,7 +48,7 @@ func Open(filename string) (*Store, error) {
 		db.Close()
 		return nil, err
 	}
-	if version > 3 {
+	if version > 4 {
 		db.Close()
 		return nil, errors.New("database schema is newer than this server")
 	}
@@ -85,6 +85,18 @@ func Open(filename string) (*Store, error) {
 		return nil, err
 	}
 	if err = initializeSignalConversions(db); err != nil {
+		db.Close()
+		return nil, err
+	}
+	if err = initializeDevices(db); err != nil {
+		db.Close()
+		return nil, err
+	}
+	if err = initializeSmartcar(db); err != nil {
+		db.Close()
+		return nil, err
+	}
+	if _, err = db.Exec("PRAGMA user_version=4"); err != nil {
 		db.Close()
 		return nil, err
 	}

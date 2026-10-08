@@ -16,6 +16,9 @@ var clientOperations = map[string]bool{
 	"reminders.list": true, "reminder.create": true, "reminder.update": true, "reminder.delete": true,
 	"trips.list": true, "trip.create": true, "trip.delete": true, "export.get": true,
 	"signals.latest": true, "signals.history": true, "signals.catalog": true,
+	"devices.list": true, "device.create": true, "device.update": true, "device.revoke": true,
+	"smartcar.configuration": true, "smartcar.status": true, "smartcar.session.create": true,
+	"smartcar.session.complete": true, "smartcar.session.bind": true, "smartcar.sync": true, "smartcar.disconnect": true,
 }
 
 var clientFailureKinds = map[string]bool{

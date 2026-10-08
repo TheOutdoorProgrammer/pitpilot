@@ -12,26 +12,31 @@ import (
 	"time"
 
 	"github.com/TheOutdoorProgrammer/pitpilot/internal/garage"
+	"github.com/TheOutdoorProgrammer/pitpilot/internal/smartcar"
 	"github.com/TheOutdoorProgrammer/pitpilot/internal/telemetry"
 )
 
 type Server struct {
-	store  *garage.Store
-	token  [32]byte
-	logger *slog.Logger
+	store    *garage.Store
+	token    [32]byte
+	logger   *slog.Logger
+	smartcar *smartcar.Service
 }
 
 func New(store *garage.Store, token string, logger *slog.Logger) (http.Handler, error) {
 	return NewWithOptions(store, token, logger, Options{})
 }
 
-type Options struct{ MetricsToken string }
+type Options struct {
+	MetricsToken string
+	Smartcar     *smartcar.Service
+}
 
 func NewWithOptions(store *garage.Store, token string, logger *slog.Logger, options Options) (http.Handler, error) {
 	if len(token) < 32 {
 		return nil, errors.New("API token must contain at least 32 bytes")
 	}
-	s := &Server{store: store, token: sha256.Sum256([]byte(token)), logger: logger}
+	s := &Server{store: store, token: sha256.Sum256([]byte(token)), logger: logger, smartcar: options.Smartcar}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { respond(w, 200, map[string]string{"status": "ok"}) })
 	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, r *http.Request) {
@@ -62,6 +67,8 @@ func NewWithOptions(store *garage.Store, token string, logger *slog.Logger, opti
 	register("POST /api/v1/client-events", s.clientEvent)
 	s.registerMigration(register)
 	s.registerSignals(register)
+	s.registerDevices(mux, register)
+	s.registerSmartcar(register)
 	if options.MetricsToken != "" {
 		if len(options.MetricsToken) < 32 || options.MetricsToken == token || strings.ContainsAny(options.MetricsToken, " \t\r\n\x00") {
 			return nil, errors.New("metrics token must be distinct and contain at least 32 bytes")

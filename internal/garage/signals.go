@@ -241,6 +241,19 @@ var signalDefinitions = func() map[string]SignalDefinition {
 	definitions := map[string]SignalDefinition{}
 	groups["km/h"] = append(groups["km/h"], "daily_top_speed_kph")
 	groups["code"] = append(groups["code"], "fuel_system_2_status")
+	groups["count"] = append(groups["count"], "warmups_since_clear")
+	groups["s"] = append(groups["s"], "run_time_s")
+	groups["min"] = []string{"time_with_mil_min", "time_since_clear_min"}
+	groups["g/s"] = []string{"maf_gps"}
+	groups["L/h"] = []string{"fuel_rate_lph"}
+	groups["ratio"] = []string{"commanded_equivalence_ratio"}
+	groups["deg"] = append(groups["deg"], "fuel_injection_deg")
+	groups["Pa"] = []string{"evap_pressure_pa", "evap_pressure_wide_pa"}
+	groups["km"] = append(groups["km"], "distance_since_clear_km", "distance_with_mil_km")
+	groups["kPa"] = append(groups["kPa"], "fuel_pressure_kpa", "fuel_rail_pressure_kpa", "fuel_rail_gauge_kpa", "barometric_kpa", "evap_absolute_kpa", "fuel_rail_absolute_kpa")
+	groups["°C"] = append(groups["°C"], "catalyst_b1s1_c", "catalyst_b2s1_c", "catalyst_b1s2_c", "catalyst_b2s2_c", "ambient_c", "oil_c")
+	groups["V"] = append(groups["V"], "control_voltage_v")
+	groups["%"] = append(groups["%"], "short_fuel_trim_bank2_pct", "long_fuel_trim_bank2_pct", "egr_commanded_pct", "egr_error_pct", "evap_purge_pct", "absolute_load_pct", "relative_throttle_pct", "throttle_b_pct", "throttle_c_pct", "pedal_d_pct", "pedal_e_pct", "pedal_f_pct", "commanded_throttle_pct", "ethanol_pct", "relative_pedal_pct")
 	for n := 3; n <= 8; n++ {
 		groups["V"] = append(groups["V"], fmt.Sprintf("o2_sensor_%d_v", n))
 	}
@@ -263,6 +276,9 @@ var signalDefinitions = func() map[string]SignalDefinition {
 	}
 	labels = map[string]string{"adapter_engine_start_count": "Adapter engine starts", "adapter_power_on_count": "Adapter power cycles", "adapter_uptime_s": "Adapter uptime", "mil_on": "Malfunction indicator", "ignition_compression": "Compression ignition", "load_pct": "Engine load", "readiness_incomplete_count": "Incomplete readiness monitors", "readiness_supported_count": "Supported readiness monitors", "long_fuel_trim_pct": "Long-term fuel trim", "short_fuel_trim_pct": "Short-term fuel trim", "throttle_pct": "Throttle position", "timing_advance_deg": "Timing advance", "dtc_count": "Diagnostic trouble code count", "retained_samples": "Retained samples", "skipped_intervals": "Skipped intervals", "speed_coverage_s": "Speed recording coverage", "moving_time_s": "Moving time", "running_time_s": "Engine running time", "idle_time_s": "Idle time", "fuel_remaining_l": "Fuel remaining", "fuel_system_1_status": "Fuel system 1 status", "fuel_system_2_status": "Fuel system 2 status", "tire_fl_kpa": "Front left tire pressure", "tire_fr_kpa": "Front right tire pressure", "tire_rl_kpa": "Rear left tire pressure", "tire_rr_kpa": "Rear right tire pressure"}
 	for metric, d := range definitions {
+		if label, ok := collectorSignalLabels[metric]; ok {
+			d.Label = label
+		}
 		if metric == "daily_top_speed_kph" {
 			d.Label = "Summary top speed"
 		}
@@ -376,16 +392,19 @@ func (o SignalObservation) Validate() error {
 	}
 	if o.Statistic != "count" {
 		if o.Unit == "%" {
-			minimum := 0.0
-			if strings.Contains(o.Metric, "trim_pct") {
+			minimum, maximum := 0.0, 100.0
+			if strings.Contains(o.Metric, "_trim_") || o.Metric == "egr_error_pct" {
 				minimum = -100
 			}
-			if o.Value < minimum || o.Value > 100 {
+			if o.Metric == "absolute_load_pct" {
+				maximum = 25700
+			}
+			if o.Value < minimum || o.Value > maximum {
 				return errors.New("percentage outside its physical range")
 			}
 		}
 		switch o.Unit {
-		case "km/h", "km", "kPa", "V", "s", "rpm", "L", "code":
+		case "km/h", "km", "kPa", "V", "s", "rpm", "L", "code", "min", "g/s", "L/h", "ratio":
 			if o.Value < 0 {
 				return errors.New("signal cannot be negative")
 			}
