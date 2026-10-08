@@ -1,0 +1,531 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		0EB6D1D0D15C9992C5EB4FAD /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90467EB56E75AFFB9D5FAEC4 /* Models.swift */; };
+		169C94B703E420593876707D /* PitPilotTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F17A4490A962341649E3CED /* PitPilotTests.swift */; };
+		273C1784B8EE8260A82A6A17 /* GarageStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA357CF1537345A4BBE33CE5 /* GarageStore.swift */; };
+		2E15C4BE19A35444C60E4E8E /* EntryForms.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A4A4A4DE5AAAB78C611A282 /* EntryForms.swift */; };
+		3E7CA45D5E39F90462B1F2A8 /* UITestProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA3435AE72CFBDB3956D9B0F /* UITestProtocol.swift */; };
+		64B445DCC0EFE709768C4BAA /* APIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = C86953AAC24AC87893E85C4C /* APIClient.swift */; };
+		8E68C1967B78A2A6E17748E4 /* PitPilotUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 63F2C87A3355A30EE2541611 /* PitPilotUITests.swift */; };
+		AD74F19B4070BFB6ABB8F0F9 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = C3C18A60DFF7327348FEAF90 /* Assets.xcassets */; };
+		B5F6BDA671ED726B3914858E /* PitPilotApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0AD2F237C5B41C4009BB7A4E /* PitPilotApp.swift */; };
+		F0D094CAE67ABBA483723C10 /* VehicleDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E57DDC368076E0FC563D811A /* VehicleDetailView.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		E05C3CF44E90A79172F7BCEE /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 0CA0A3246ED1A60874C656E6 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 46C8FE0847DC31D2F356F9D1;
+			remoteInfo = PitPilot;
+		};
+		F44AA84F41AECDDB80454DA0 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 0CA0A3246ED1A60874C656E6 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 46C8FE0847DC31D2F356F9D1;
+			remoteInfo = PitPilot;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		0AD2F237C5B41C4009BB7A4E /* PitPilotApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PitPilotApp.swift; sourceTree = "<group>"; };
+		5A4A4A4DE5AAAB78C611A282 /* EntryForms.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EntryForms.swift; sourceTree = "<group>"; };
+		5D81E740C8B35FFC2B726366 /* PitPilot.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = PitPilot.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		63F2C87A3355A30EE2541611 /* PitPilotUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PitPilotUITests.swift; sourceTree = "<group>"; };
+		90467EB56E75AFFB9D5FAEC4 /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
+		9F17A4490A962341649E3CED /* PitPilotTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PitPilotTests.swift; sourceTree = "<group>"; };
+		AEEAAD68CE3476A636366836 /* PitPilotUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = PitPilotUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		BA3435AE72CFBDB3956D9B0F /* UITestProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UITestProtocol.swift; sourceTree = "<group>"; };
+		BA357CF1537345A4BBE33CE5 /* GarageStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GarageStore.swift; sourceTree = "<group>"; };
+		C3C18A60DFF7327348FEAF90 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		C86953AAC24AC87893E85C4C /* APIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIClient.swift; sourceTree = "<group>"; };
+		D5B401A89F2B86300F02C72D /* PitPilotTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = PitPilotTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		E57DDC368076E0FC563D811A /* VehicleDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VehicleDetailView.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXGroup section */
+		018CB5A2153373F8535FD024 /* PitPilot */ = {
+			isa = PBXGroup;
+			children = (
+				C86953AAC24AC87893E85C4C /* APIClient.swift */,
+				C3C18A60DFF7327348FEAF90 /* Assets.xcassets */,
+				5A4A4A4DE5AAAB78C611A282 /* EntryForms.swift */,
+				BA357CF1537345A4BBE33CE5 /* GarageStore.swift */,
+				90467EB56E75AFFB9D5FAEC4 /* Models.swift */,
+				0AD2F237C5B41C4009BB7A4E /* PitPilotApp.swift */,
+				BA3435AE72CFBDB3956D9B0F /* UITestProtocol.swift */,
+				E57DDC368076E0FC563D811A /* VehicleDetailView.swift */,
+			);
+			path = PitPilot;
+			sourceTree = "<group>";
+		};
+		020CCDEE47F831B1406248C4 /* PitPilotTests */ = {
+			isa = PBXGroup;
+			children = (
+				9F17A4490A962341649E3CED /* PitPilotTests.swift */,
+			);
+			path = PitPilotTests;
+			sourceTree = "<group>";
+		};
+		14997159F9CE2C6D35427A43 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				5D81E740C8B35FFC2B726366 /* PitPilot.app */,
+				D5B401A89F2B86300F02C72D /* PitPilotTests.xctest */,
+				AEEAAD68CE3476A636366836 /* PitPilotUITests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		8D47D3DF9781DE388720FE4D = {
+			isa = PBXGroup;
+			children = (
+				018CB5A2153373F8535FD024 /* PitPilot */,
+				020CCDEE47F831B1406248C4 /* PitPilotTests */,
+				DC9A702390AF35607A672F35 /* PitPilotUITests */,
+				14997159F9CE2C6D35427A43 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		DC9A702390AF35607A672F35 /* PitPilotUITests */ = {
+			isa = PBXGroup;
+			children = (
+				63F2C87A3355A30EE2541611 /* PitPilotUITests.swift */,
+			);
+			path = PitPilotUITests;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		46C8FE0847DC31D2F356F9D1 /* PitPilot */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = FA537467C8CF355CDDF1BDD7 /* Build configuration list for PBXNativeTarget "PitPilot" */;
+			buildPhases = (
+				32FFF435147D53FC0C007359 /* Sources */,
+				D619564848FFAEA8B1CB4371 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = PitPilot;
+			packageProductDependencies = (
+			);
+			productName = PitPilot;
+			productReference = 5D81E740C8B35FFC2B726366 /* PitPilot.app */;
+			productType = "com.apple.product-type.application";
+		};
+		870A7D1C9CD9DECCC52C73CC /* PitPilotUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = F186716A84B3A47EF0023BE8 /* Build configuration list for PBXNativeTarget "PitPilotUITests" */;
+			buildPhases = (
+				E0F2C51CB6E9A82C2F222E10 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				ADE344B32F887482BE01CE44 /* PBXTargetDependency */,
+			);
+			name = PitPilotUITests;
+			packageProductDependencies = (
+			);
+			productName = PitPilotUITests;
+			productReference = AEEAAD68CE3476A636366836 /* PitPilotUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
+		9FED3547C43E9171039050F6 /* PitPilotTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = E58EDE84678A0FD8DD6A7785 /* Build configuration list for PBXNativeTarget "PitPilotTests" */;
+			buildPhases = (
+				70D50F1DED75BBFCB0AD2100 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				6E6794EFEDB524C27252C796 /* PBXTargetDependency */,
+			);
+			name = PitPilotTests;
+			packageProductDependencies = (
+			);
+			productName = PitPilotTests;
+			productReference = D5B401A89F2B86300F02C72D /* PitPilotTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		0CA0A3246ED1A60874C656E6 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+					46C8FE0847DC31D2F356F9D1 = {
+						ProvisioningStyle = Automatic;
+					};
+					870A7D1C9CD9DECCC52C73CC = {
+						TestTargetID = 46C8FE0847DC31D2F356F9D1;
+					};
+				};
+			};
+			buildConfigurationList = BF7597E1A75E414DB7237B35 /* Build configuration list for PBXProject "PitPilot" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = 8D47D3DF9781DE388720FE4D;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 14997159F9CE2C6D35427A43 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				46C8FE0847DC31D2F356F9D1 /* PitPilot */,
+				9FED3547C43E9171039050F6 /* PitPilotTests */,
+				870A7D1C9CD9DECCC52C73CC /* PitPilotUITests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		D619564848FFAEA8B1CB4371 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				AD74F19B4070BFB6ABB8F0F9 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		32FFF435147D53FC0C007359 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				64B445DCC0EFE709768C4BAA /* APIClient.swift in Sources */,
+				2E15C4BE19A35444C60E4E8E /* EntryForms.swift in Sources */,
+				273C1784B8EE8260A82A6A17 /* GarageStore.swift in Sources */,
+				0EB6D1D0D15C9992C5EB4FAD /* Models.swift in Sources */,
+				B5F6BDA671ED726B3914858E /* PitPilotApp.swift in Sources */,
+				3E7CA45D5E39F90462B1F2A8 /* UITestProtocol.swift in Sources */,
+				F0D094CAE67ABBA483723C10 /* VehicleDetailView.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		70D50F1DED75BBFCB0AD2100 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				169C94B703E420593876707D /* PitPilotTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		E0F2C51CB6E9A82C2F222E10 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				8E68C1967B78A2A6E17748E4 /* PitPilotUITests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		6E6794EFEDB524C27252C796 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 46C8FE0847DC31D2F356F9D1 /* PitPilot */;
+			targetProxy = E05C3CF44E90A79172F7BCEE /* PBXContainerItemProxy */;
+		};
+		ADE344B32F887482BE01CE44 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 46C8FE0847DC31D2F356F9D1 /* PitPilot */;
+			targetProxy = F44AA84F41AECDDB80454DA0 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		05DB1E7FDEEE8521B4EC54C3 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.theoutdoorprogrammer.pitpilot.uitests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = PitPilot;
+			};
+			name = Debug;
+		};
+		1A2EDF7BF84BA76AD6347AC9 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.theoutdoorprogrammer.pitpilot.tests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/PitPilot.app/PitPilot";
+			};
+			name = Release;
+		};
+		4984FA033427588FF4ECD01C /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.theoutdoorprogrammer.pitpilot.uitests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = PitPilot;
+			};
+			name = Release;
+		};
+		5075A4832EF1540FB77D3C86 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 0.1.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+				VERSIONING_SYSTEM = "apple-generic";
+			};
+			name = Debug;
+		};
+		756C32FC40CBD3D511D41A3A /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CODE_SIGN_STYLE = Automatic;
+				INFOPLIST_FILE = "PitPilot-Info.plist";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PITPILOT_BASE_URL = "";
+				PRODUCT_BUNDLE_IDENTIFIER = com.theoutdoorprogrammer.pitpilot;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		C8527DBF6EA972FD13A45B81 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CODE_SIGN_STYLE = Automatic;
+				INFOPLIST_FILE = "PitPilot-Info.plist";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PITPILOT_BASE_URL = "";
+				PRODUCT_BUNDLE_IDENTIFIER = com.theoutdoorprogrammer.pitpilot;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		FC4183D2364A823B02C88A2D /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.theoutdoorprogrammer.pitpilot.tests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/PitPilot.app/PitPilot";
+			};
+			name = Debug;
+		};
+		FE99CEEA7CB642ECCF06BBBD /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 0.1.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+				VERSIONING_SYSTEM = "apple-generic";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		BF7597E1A75E414DB7237B35 /* Build configuration list for PBXProject "PitPilot" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				5075A4832EF1540FB77D3C86 /* Debug */,
+				FE99CEEA7CB642ECCF06BBBD /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		E58EDE84678A0FD8DD6A7785 /* Build configuration list for PBXNativeTarget "PitPilotTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				FC4183D2364A823B02C88A2D /* Debug */,
+				1A2EDF7BF84BA76AD6347AC9 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		F186716A84B3A47EF0023BE8 /* Build configuration list for PBXNativeTarget "PitPilotUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				05DB1E7FDEEE8521B4EC54C3 /* Debug */,
+				4984FA033427588FF4ECD01C /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		FA537467C8CF355CDDF1BDD7 /* Build configuration list for PBXNativeTarget "PitPilot" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				756C32FC40CBD3D511D41A3A /* Debug */,
+				C8527DBF6EA972FD13A45B81 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 0CA0A3246ED1A60874C656E6 /* Project object */;
+}
