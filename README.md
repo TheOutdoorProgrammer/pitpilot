@@ -2,7 +2,7 @@
 
 Vehicle maintenance, trip history, and connected vehicle data, with a Go backend and a native iOS app.
 
-PitPilot brings maintenance records and driving history into one application. The first release provides a native garage and a persistent Go API. Built-in Smartcar and Raspberry Pi collection are planned next; the full replacement scope is tracked in the [feature checklist](FEATURES.md).
+PitPilot brings maintenance records and driving history into one application. The initial implementation provides a native garage and a persistent Go API. Built-in Smartcar and Raspberry Pi collection are planned next; the full replacement scope is tracked in the [feature checklist](FEATURES.md).
 
 The planned Raspberry Pi integration includes app-guided setup, offline collection, and automatic signed updates with rollback. Routine setup and troubleshooting should not require SSH.
 

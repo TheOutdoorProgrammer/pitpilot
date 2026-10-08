@@ -69,7 +69,8 @@ final class GarageStore: ObservableObject {
             }
         } catch { self.error = error.localizedDescription }
         #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("--ui-testing") {
+        if ProcessInfo.processInfo.arguments.contains("--ui-testing"),
+           !ProcessInfo.processInfo.arguments.contains("--ui-testing-preserve-cache") {
             connection = nil
             cache = GarageCache()
             offline = false
