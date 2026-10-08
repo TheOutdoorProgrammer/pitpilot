@@ -83,11 +83,11 @@ final class GarageStore: ObservableObject {
     }
 
     init(connection: Connection, cache: GarageCache, offline: Bool = false, cacheURL: URL, session: URLSession) {
+        self.cacheURL = cacheURL
+        self.session = session
         self.connection = connection
         self.cache = cache
         self.offline = offline
-        self.cacheURL = cacheURL
-        self.session = session
     }
 
     var vehicles: [Vehicle] { cache.vehicles }
