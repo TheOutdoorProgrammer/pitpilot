@@ -99,11 +99,17 @@ Connection recovery: [v0.1.1](https://github.com/TheOutdoorProgrammer/pitpilot/r
 - [x] Implement typed LiteDB extraction, protected source preservation, preview/apply reconciliation and conflict detection. See [the migration workflow](docs/lubelogger-migration.md) for supported data and explicit blockers.
 - [x] Support undated notes, typed custom fields, estimated odometer readings and planned work in the migration projection and native app.
 - [ ] Import LubeLogger vehicles, record types, attachments, custom fields, units, and relationships with a preview and reconciliation report.
-- [ ] Make imports repeatable without duplicates and report unsupported data before cutover.
+- [x] Make imports repeatable without duplicates and report unsupported data before cutover.
 - [ ] Export vehicle records, attachments, and recorded tracks in documented formats.
 - [ ] Preserve existing Home Assistant integration through a supported interface and validate MQTT discovery where used.
 - [ ] Provide a documented authenticated API and integration events or webhooks.
 - [ ] Back up and restore records, attachments, device identities, and integration state; verify restoration on a clean installation.
+
+Migration validation: [CI](https://github.com/TheOutdoorProgrammer/pitpilot/actions/runs/37828421701) passes backend race tests, static checks, vulnerability scanning, GoReleaser builds, the runtime image build and synthetic LiteDB extraction checks. All 18 native unit tests and four UI journeys pass on the self-hosted runner, including imported note editing, metadata preservation, estimated readings, planned work and recurring reminder completion. Reviewed simulator screenshots confirm the imported values and source details are visible. Storage tests cover atomic conflict rejection, repeat imports, pinned interpretation settings and online backup restoration. This does not complete the broader attachments, units and integration requirements above.
+
+[Version 0.2.0](https://github.com/TheOutdoorProgrammer/pitpilot/releases/tag/v0.2.0) passed the same native suite during [release](https://github.com/TheOutdoorProgrammer/pitpilot/actions/runs/37829804233). The signed app is 0.2.0, build 3; the Fledge download matches the verified staged IPA. Quill built Linux and macOS binaries with GoReleaser before Docker copied and checked the Linux binaries. The downloaded macOS CLI passed checksum and runtime-version checks.
+
+Deployed acceptance exercised preview, application, repeat application, sparse edits, metadata preservation, and rejection of an entire mixed batch containing a conflict. The synthetic vehicle was removed afterward. A new online backup was copied off the database host, checked for integrity, restored separately, and opened successfully by the released CLI. Grafana received correlated migration and backup spans and logs with version 0.2.0; inspected telemetry contained route templates and counts without record contents or identifiers. Install the new native app before importing an existing garage.
 
 ### Operation and replacement acceptance
 

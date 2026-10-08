@@ -8,11 +8,11 @@ The planned Raspberry Pi integration includes app-guided setup, offline collecti
 
 ## Status
 
-[The current release, v0.1.1](https://github.com/TheOutdoorProgrammer/pitpilot/releases/tag/v0.1.1), supports vehicles, service and fuel records, reminders, recorded-trip display, and JSON export. The iOS app stores its access token in Keychain and caches records for offline reading. It does not queue offline changes. Signed test builds are distributed through Fledge to devices included in the provisioning profile.
+[The current release, v0.2.0](https://github.com/TheOutdoorProgrammer/pitpilot/releases/tag/v0.2.0), adds [LubeLogger migration](docs/lubelogger-migration.md), undated notes, custom fields, odometer provenance, planned work, metadata-preserving edits, and recurring reminders to the native garage. Migration previews changes and applies them atomically, with duplicate prevention and conflict reporting. Supported source data and import blockers are documented in the migration guide.
 
-Version 0.1.1 fixes cancelled refreshes incorrectly switching the app into offline mode. New refreshes replace older work, while genuine transport failures report a bounded diagnostic category through the authenticated telemetry relay.
+The iOS app stores its access token in Keychain and caches records for offline reading. It does not queue offline changes. Signed test builds are distributed through Fledge to devices included in the provisioning profile. Install version 0.2.0 before importing: older apps cannot read the new record categories.
 
-The next release adds [LubeLogger migration](docs/lubelogger-migration.md), undated notes, custom fields, odometer provenance, planned work, metadata-preserving edits, and recurring reminder intervals. Migration uses a typed source snapshot, previews changes, and applies them atomically without duplicating records or overwriting conflicting edits.
+The release includes the cancellation fix from 0.1.1. New refreshes replace older work, while genuine transport failures report a bounded diagnostic category through the authenticated telemetry relay.
 
 Automatic vehicle ingestion, receipt attachments, push notifications, and CrewChief AI remain unfinished. Existing vehicle integrations should continue running until migration and replacement acceptance checks pass.
 

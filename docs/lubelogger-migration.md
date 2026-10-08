@@ -24,7 +24,9 @@ The extractor includes every collection in its private output. The Go CLI valida
 
 ## Rehearse locally
 
-Build the Go CLI or use `go run ./cmd/pitpilot` in place of `pitpilot`. The command appears under `pitpilot --help` and `joey search pitpilot`.
+Download the CLI archive for your operating system and architecture from the [release assets](https://github.com/TheOutdoorProgrammer/pitpilot/releases/tag/v0.2.0), and verify it against the published `checksums.txt`. Linux and macOS binaries support AMD64 and ARM64. The optional LiteDB extractor still needs the .NET SDK described in its README.
+
+You can also build the Go CLI or use `go run ./cmd/pitpilot` in place of `pitpilot`. The command appears under `pitpilot --help` and `joey search pitpilot`.
 
 ```sh
 umask 077
@@ -45,7 +47,15 @@ Repeat the command with `--apply TOKEN_FROM_PREVIEW` to commit the rehearsal. An
 
 ## Import into your server
 
-Back up the target first. Install the matching native app before relying on new categories. Replace `--database` with an HTTPS server and a private token file:
+Back up the target first. Version 0.2.0 includes an online backup command for the host where the database lives:
+
+```sh
+pitpilot backup --database /data/pitpilot.db --output /private/backup.db
+```
+
+The output must be a new file in an existing directory. Copy it off the host, verify its integrity, and test [restoration](api.md#export-and-backup). The command does not apply database migrations to the source.
+
+Install native app version 0.2.0 before importing. Older apps cannot read the new odometer and planned-work record categories. Replace `--database` with an HTTPS server and a private token file:
 
 ```sh
 pitpilot migrate-lubelogger \
