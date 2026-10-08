@@ -7,7 +7,7 @@ final class UITestProtocol: URLProtocol {
     private static let migration = ProcessInfo.processInfo.arguments.contains("--ui-testing-migration")
     private static let signals = ProcessInfo.processInfo.arguments.contains("--ui-testing-signals")
     static var vehicles: [[String: Any]] = {
-        guard populated || migration || signals else { return [] }
+        guard populated || migration || signals || ProcessInfo.processInfo.arguments.contains("--ui-testing-integrations") else { return [] }
         var vehicle: [String: Any] = ["id": "test-vehicle", "name": "Synthetic route truck", "make": "", "model": "", "year": 2002, "odometerMiles": 120000, "createdAt": "2026-01-01T00:00:00Z"]
         if migration {
             vehicle["vin"] = "SYNTHETIC-VIN"
@@ -65,6 +65,7 @@ final class UITestProtocol: URLProtocol {
         }
         if request.value(forHTTPHeaderField: "Authorization") != "Bearer test-token" { code = 401; response = ["error": "Unauthorized"] }
         else if route == "/api/v1/client-events" { code = 204 }
+        else if let fixture = IntegrationFixture.reply(route: route, method: request.httpMethod ?? "GET", body: body) { code = fixture.0; response = fixture.1 }
         else if route.hasSuffix("/signals/latest") { response = Self.signalLatest }
         else if route.hasSuffix("/signals/history") {
             if ProcessInfo.processInfo.arguments.contains("--ui-testing-history-error") { code = 503; response = ["error": "Synthetic unavailable"] }

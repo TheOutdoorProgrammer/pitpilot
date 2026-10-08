@@ -263,6 +263,98 @@ final class PitPilotUITests: XCTestCase {
         }
     }
 
+    func testPiPairingUpdatesAndRevocation() {
+        let app = openIntegrations()
+        app.buttons["pairPi"].tap()
+        let name = app.textFields["piName"]
+        XCTAssertTrue(name.waitForExistence(timeout: 5))
+        name.tap(); name.typeText("Synthetic collector")
+        app.buttons["Create token"].tap()
+        let token = app.staticTexts["pairingToken"]
+        XCTAssertTrue(token.waitForExistence(timeout: 5))
+        XCTAssertEqual(token.label, "synthetic-pairing-token-not-a-real-secret")
+        capture("Pi one-time pairing with synthetic token", app)
+        app.buttons["Done"].tap()
+        XCTAssertTrue(token.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Waiting for pairing"].waitForExistence(timeout: 5))
+        let updates = app.switches["deviceAutoUpdate-fixture-device"]
+        reveal(updates, app)
+        XCTAssertEqual(updates.value as? String, "1")
+        updates.tap()
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in updates.value as? String == "0" }, object: nil)], timeout: 5), .completed)
+        capture("Pi waiting for pairing with updates paused", app)
+        let revoke = app.buttons["revokePi-fixture-device"]
+        reveal(revoke, app); revoke.tap()
+        XCTAssertTrue(app.buttons["confirmRevokePi"].waitForExistence(timeout: 5))
+        app.buttons["confirmRevokePi"].tap()
+        XCTAssertTrue(app.staticTexts["Access revoked"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.switches["deviceAutoUpdate-fixture-device"].exists)
+        capture("Pi access revoked keeps previous readings", app)
+    }
+
+    func testSmartcarSelectionProvisioningAndDisconnect() {
+        let app = openIntegrations()
+        let connect = app.buttons["connectSmartcar"]
+        reveal(connect, app)
+        XCTAssertTrue(app.staticTexts["Simulated vehicle data"].exists)
+        connect.tap()
+        let candidate = app.buttons["smartcarCandidate-synthetic-candidate"]
+        reveal(candidate, app)
+        XCTAssertTrue(candidate.label.contains("2024 Sample Roadster"))
+        capture("Smartcar explicit vehicle selection", app)
+        candidate.tap()
+        XCTAssertTrue(app.staticTexts["Waiting for vehicle data"].waitForExistence(timeout: 5))
+        capture("Smartcar provisioning without invented readings", app)
+        let sync = app.buttons["syncSmartcar"]
+        reveal(sync, app); sync.tap()
+        XCTAssertTrue(app.staticTexts["Vehicle linked"].waitForExistence(timeout: 5))
+        capture("Smartcar observed and checked times remain separate", app)
+        let disconnect = app.buttons["disconnectSmartcar"]
+        reveal(disconnect, app); disconnect.tap()
+        XCTAssertTrue(app.buttons["confirmDisconnectSmartcar"].waitForExistence(timeout: 5))
+        app.buttons["confirmDisconnectSmartcar"].tap()
+        XCTAssertTrue(app.staticTexts["Not linked"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["syncSmartcar"].exists)
+    }
+
+    func testIntegrationUnavailableStaleAndCancelledStates() {
+        let app = openIntegrations(extra: ["--ui-testing-device-stale", "--ui-testing-smartcar-reconnect", "--ui-testing-smartcar-cancel"])
+        XCTAssertTrue(app.staticTexts["Check-in overdue"].waitForExistence(timeout: 5))
+        capture("Pi overdue heartbeat and rejected samples", app)
+        let reconnect = app.buttons["connectSmartcar"]
+        reveal(reconnect, app)
+        XCTAssertEqual(reconnect.label, "Reconnect Smartcar")
+        capture("Smartcar reconnect needed", app)
+        reconnect.tap()
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in reconnect.isEnabled }, object: nil)], timeout: 5), .completed)
+        XCTAssertFalse(app.staticTexts["integrationError"].exists)
+        XCTAssertFalse(app.buttons["smartcarCandidate-synthetic-candidate"].exists)
+        app.terminate()
+        let unconfigured = openIntegrations(extra: ["--ui-testing-smartcar-unconfigured"])
+        let message = unconfigured.staticTexts["Smartcar is not configured on your server yet."]
+        reveal(message, unconfigured)
+        XCTAssertFalse(unconfigured.buttons["connectSmartcar"].exists)
+        capture("Smartcar server configuration required", unconfigured)
+    }
+
+    private func openIntegrations(extra: [String] = []) -> XCUIApplication {
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-testing", "--ui-testing-integrations"] + extra
+        app.launch(); connect(app)
+        app.staticTexts["Synthetic route truck"].tap()
+        let integrations = app.buttons["vehicleIntegrations"]
+        XCTAssertTrue(integrations.waitForExistence(timeout: 5))
+        integrations.tap()
+        XCTAssertTrue(app.buttons["pairPi"].waitForExistence(timeout: 5))
+        return app
+    }
+
+    private func reveal(_ element: XCUIElement, _ app: XCUIApplication) {
+        for _ in 0..<7 where !element.isHittable { app.swipeUp() }
+        XCTAssertTrue(element.waitForExistence(timeout: 5))
+        XCTAssertTrue(element.isHittable)
+    }
+
     private func connect(_ app: XCUIApplication) {
         let button = app.buttons["connectButton"]
         XCTAssertFalse(button.isEnabled)

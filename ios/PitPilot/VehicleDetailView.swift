@@ -45,7 +45,23 @@ struct VehicleDetailView: View {
                     ForEach(["Overview", "History", "Upcoming", "Trips"], id: \.self) { Text($0) }
                 }.pickerStyle(.segmented)
                 switch selected {
-                case "Overview": VehicleSignalsView(vehicleID: vehicle.id)
+                case "Overview":
+                    if let connection = store.connection {
+                        NavigationLink {
+                            VehicleIntegrationsView(vehicleID: vehicle.id, connection: connection)
+                        } label: {
+                            HStack(spacing: 14) {
+                                Image(systemName: "antenna.radiowaves.left.and.right").font(.title2).foregroundStyle(PitStyle.amber)
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("Vehicle integrations").font(.headline).foregroundStyle(.primary)
+                                    Text("Pair a Pi or link Smartcar").font(.subheadline).foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                Image(systemName: "chevron.right").foregroundStyle(PitStyle.amber)
+                            }.padding(18).background(PitStyle.panel, in: RoundedRectangle(cornerRadius: 18))
+                        }.buttonStyle(.plain).accessibilityIdentifier("vehicleIntegrations")
+                    }
+                    VehicleSignalsView(vehicleID: vehicle.id)
                 case "Upcoming": reminders
                 case "Trips": trips
                 default: history

@@ -137,6 +137,24 @@ struct APIClient {
 
     static func operation(route: String, method: String) -> String? {
         let parts = route.split(separator: "/")
+        if parts == ["integrations", "smartcar"], method == "GET" { return "smartcar.configuration" }
+        if parts.count == 2, parts[0] == "devices" {
+            switch method { case "PATCH": return "device.update"; case "DELETE": return "device.revoke"; default: return nil }
+        }
+        if parts.count >= 3, parts[0] == "vehicles" {
+            if parts.count == 3, parts[2] == "devices" {
+                return method == "GET" ? "devices.list" : method == "POST" ? "device.create" : nil
+            }
+            if parts[2] == "smartcar" {
+                if parts.count == 3 { return method == "GET" ? "smartcar.status" : method == "DELETE" ? "smartcar.disconnect" : nil }
+                if parts.count == 4, method == "POST" {
+                    return parts[3] == "sessions" ? "smartcar.session.create" : parts[3] == "sync" ? "smartcar.sync" : nil
+                }
+                if parts.count == 6, parts[3] == "sessions", method == "POST" {
+                    return parts[5] == "complete" ? "smartcar.session.complete" : parts[5] == "bind" ? "smartcar.session.bind" : nil
+                }
+            }
+        }
         if parts.count == 4, parts[0] == "vehicles", parts[2] == "signals", method == "GET" {
             switch parts[3] { case "latest": return "signals.latest"; case "history": return "signals.history"; default: return nil }
         }

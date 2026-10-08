@@ -7,17 +7,21 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		026C6E63B089458581FF16AC /* Signals.swift in Sources */ = {isa = PBXBuildFile; fileRef = 754E686B127340B0933A898B /* Signals.swift */; };
-		1248627210174DAC85E834A4 /* SignalViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5CF7812815C1458C8D373010 /* SignalViews.swift */; };
+		03E67FB257B3973AC760CC04 /* Signals.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3460B47288D11779B283352E /* Signals.swift */; };
 		0EB6D1D0D15C9992C5EB4FAD /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90467EB56E75AFFB9D5FAEC4 /* Models.swift */; };
+		1047B9157ED4A954C98A20E7 /* Integrations.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E9B0A3733C73FB05BD16DBD /* Integrations.swift */; };
 		169C94B703E420593876707D /* PitPilotTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F17A4490A962341649E3CED /* PitPilotTests.swift */; };
 		273C1784B8EE8260A82A6A17 /* GarageStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA357CF1537345A4BBE33CE5 /* GarageStore.swift */; };
 		2E15C4BE19A35444C60E4E8E /* EntryForms.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A4A4A4DE5AAAB78C611A282 /* EntryForms.swift */; };
+		3D1C32C48F1343A184F0D633 /* SmartcarBrowser.swift in Sources */ = {isa = PBXBuildFile; fileRef = F464EBAE7A16F9853B2A0111 /* SmartcarBrowser.swift */; };
 		3E7CA45D5E39F90462B1F2A8 /* UITestProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA3435AE72CFBDB3956D9B0F /* UITestProtocol.swift */; };
+		428E21005EF419749AA22D95 /* IntegrationFixture.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4879F414BF50E8D38F412866 /* IntegrationFixture.swift */; };
+		44251BC4E24D50A0BD9121B3 /* SignalViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 09FB7EA52FDC7960110EFC69 /* SignalViews.swift */; };
 		64B445DCC0EFE709768C4BAA /* APIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = C86953AAC24AC87893E85C4C /* APIClient.swift */; };
 		8E68C1967B78A2A6E17748E4 /* PitPilotUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 63F2C87A3355A30EE2541611 /* PitPilotUITests.swift */; };
 		AD74F19B4070BFB6ABB8F0F9 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = C3C18A60DFF7327348FEAF90 /* Assets.xcassets */; };
 		B5F6BDA671ED726B3914858E /* PitPilotApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0AD2F237C5B41C4009BB7A4E /* PitPilotApp.swift */; };
+		BC905338ED0790B0428F862D /* IntegrationViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 52B0B1084DB9C865BBF89CC8 /* IntegrationViews.swift */; };
 		F0D094CAE67ABBA483723C10 /* VehicleDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E57DDC368076E0FC563D811A /* VehicleDetailView.swift */; };
 /* End PBXBuildFile section */
 
@@ -39,9 +43,12 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
-		754E686B127340B0933A898B /* Signals.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Signals.swift; sourceTree = "<group>"; };
-		5CF7812815C1458C8D373010 /* SignalViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SignalViews.swift; sourceTree = "<group>"; };
+		09FB7EA52FDC7960110EFC69 /* SignalViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SignalViews.swift; sourceTree = "<group>"; };
 		0AD2F237C5B41C4009BB7A4E /* PitPilotApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PitPilotApp.swift; sourceTree = "<group>"; };
+		0E9B0A3733C73FB05BD16DBD /* Integrations.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Integrations.swift; sourceTree = "<group>"; };
+		3460B47288D11779B283352E /* Signals.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Signals.swift; sourceTree = "<group>"; };
+		4879F414BF50E8D38F412866 /* IntegrationFixture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntegrationFixture.swift; sourceTree = "<group>"; };
+		52B0B1084DB9C865BBF89CC8 /* IntegrationViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntegrationViews.swift; sourceTree = "<group>"; };
 		5A4A4A4DE5AAAB78C611A282 /* EntryForms.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EntryForms.swift; sourceTree = "<group>"; };
 		5D81E740C8B35FFC2B726366 /* PitPilot.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = PitPilot.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		63F2C87A3355A30EE2541611 /* PitPilotUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PitPilotUITests.swift; sourceTree = "<group>"; };
@@ -54,6 +61,7 @@
 		C86953AAC24AC87893E85C4C /* APIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIClient.swift; sourceTree = "<group>"; };
 		D5B401A89F2B86300F02C72D /* PitPilotTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = PitPilotTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		E57DDC368076E0FC563D811A /* VehicleDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VehicleDetailView.swift; sourceTree = "<group>"; };
+		F464EBAE7A16F9853B2A0111 /* SmartcarBrowser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SmartcarBrowser.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -64,10 +72,14 @@
 				C3C18A60DFF7327348FEAF90 /* Assets.xcassets */,
 				5A4A4A4DE5AAAB78C611A282 /* EntryForms.swift */,
 				BA357CF1537345A4BBE33CE5 /* GarageStore.swift */,
+				4879F414BF50E8D38F412866 /* IntegrationFixture.swift */,
+				0E9B0A3733C73FB05BD16DBD /* Integrations.swift */,
+				52B0B1084DB9C865BBF89CC8 /* IntegrationViews.swift */,
 				90467EB56E75AFFB9D5FAEC4 /* Models.swift */,
 				0AD2F237C5B41C4009BB7A4E /* PitPilotApp.swift */,
-				754E686B127340B0933A898B /* Signals.swift */,
-				5CF7812815C1458C8D373010 /* SignalViews.swift */,
+				3460B47288D11779B283352E /* Signals.swift */,
+				09FB7EA52FDC7960110EFC69 /* SignalViews.swift */,
+				F464EBAE7A16F9853B2A0111 /* SmartcarBrowser.swift */,
 				BA3435AE72CFBDB3956D9B0F /* UITestProtocol.swift */,
 				E57DDC368076E0FC563D811A /* VehicleDetailView.swift */,
 			);
@@ -224,10 +236,14 @@
 				64B445DCC0EFE709768C4BAA /* APIClient.swift in Sources */,
 				2E15C4BE19A35444C60E4E8E /* EntryForms.swift in Sources */,
 				273C1784B8EE8260A82A6A17 /* GarageStore.swift in Sources */,
+				428E21005EF419749AA22D95 /* IntegrationFixture.swift in Sources */,
+				BC905338ED0790B0428F862D /* IntegrationViews.swift in Sources */,
+				1047B9157ED4A954C98A20E7 /* Integrations.swift in Sources */,
 				0EB6D1D0D15C9992C5EB4FAD /* Models.swift in Sources */,
 				B5F6BDA671ED726B3914858E /* PitPilotApp.swift in Sources */,
-				026C6E63B089458581FF16AC /* Signals.swift in Sources */,
-				1248627210174DAC85E834A4 /* SignalViews.swift in Sources */,
+				44251BC4E24D50A0BD9121B3 /* SignalViews.swift in Sources */,
+				03E67FB257B3973AC760CC04 /* Signals.swift in Sources */,
+				3D1C32C48F1343A184F0D633 /* SmartcarBrowser.swift in Sources */,
 				3E7CA45D5E39F90462B1F2A8 /* UITestProtocol.swift in Sources */,
 				F0D094CAE67ABBA483723C10 /* VehicleDetailView.swift in Sources */,
 			);
@@ -369,7 +385,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				MARKETING_VERSION = 0.3.1;
+				MARKETING_VERSION = 0.4.0;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
@@ -482,7 +498,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				MARKETING_VERSION = 0.3.1;
+				MARKETING_VERSION = 0.4.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";

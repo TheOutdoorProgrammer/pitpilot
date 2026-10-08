@@ -519,8 +519,158 @@ final class PitPilotTests: XCTestCase {
     }
 }
 
+extension PitPilotTests {
+    private var integrationSession: SmartcarSession {
+        SmartcarSession(sessionId: "synthetic-session", authorizationUrl: URL(string: "https://connect.smartcar.com/oauth/authorize?state=expected-state")!, callbackScheme: "sc00000000-0000-4000-8000-000000000000", expiresAt: "2099-01-01T00:00:00Z")
+    }
+
+    func testSmartcarCallbackAllowlistAndStateValidation() throws {
+        let session = integrationSession
+        let callback = URL(string: "\(session.callbackScheme)://callback?state=expected-state&user_id=synthetic-user&vehicle_id=synthetic-vehicle&external_id=synthetic-external&access_token=must-not-forward")!
+        let body = try session.completion(callback)
+        XCTAssertEqual(body, ["state": "expected-state", "userId": "synthetic-user", "vehicleId": "synthetic-vehicle", "externalId": "synthetic-external"])
+        for suffix in ["state=wrong", "state=expected-state&state=expected-state", "state=expected-state&user_id=a&user_id=b", "state=expected-state&error=", "user_id=synthetic-user"] {
+            XCTAssertThrowsError(try session.completion(URL(string: "\(session.callbackScheme)://callback?\(suffix)")!))
+        }
+        for callback in ["other://callback?state=expected-state", "\(session.callbackScheme)://evil?state=expected-state", "\(session.callbackScheme)://callback/other?state=expected-state", "\(session.callbackScheme)://callback?state=expected-state#fragment"] {
+            XCTAssertThrowsError(try session.completion(URL(string: callback)!))
+        }
+        XCTAssertEqual(try session.completion(URL(string: "\(session.callbackScheme)://callback?state=expected-state&error=access_denied")!)["error"], "access_denied")
+    }
+
+    func testSmartcarSessionRejectsUntrustedOrExpiredAuthorization() throws {
+        for url in ["http://connect.smartcar.com/oauth/authorize?state=x", "https://connect.smartcar.com.evil.test/oauth/authorize?state=x", "https://connect.smartcar.com:444/oauth/authorize?state=x", "https://user@connect.smartcar.com/oauth/authorize?state=x", "https://connect.smartcar.com/other?state=x", "https://connect.smartcar.com/oauth/authorize", "https://connect.smartcar.com/oauth/authorize?state=a&state=b"] {
+            let session = SmartcarSession(sessionId: "test", authorizationUrl: URL(string: url)!, callbackScheme: integrationSession.callbackScheme, expiresAt: integrationSession.expiresAt)
+            XCTAssertThrowsError(try session.validate(), url)
+        }
+        let expired = SmartcarSession(sessionId: "test", authorizationUrl: integrationSession.authorizationUrl, callbackScheme: integrationSession.callbackScheme, expiresAt: "2000-01-01T00:00:00Z")
+        XCTAssertThrowsError(try expired.validate())
+        let wrongScheme = SmartcarSession(sessionId: "test", authorizationUrl: integrationSession.authorizationUrl, callbackScheme: "https", expiresAt: integrationSession.expiresAt)
+        XCTAssertThrowsError(try wrongScheme.validate())
+    }
+
+    func testPiContactStatusDoesNotInventConnectivity() throws {
+        var device = VehicleDevice(id: "device", vehicleId: "vehicle", name: "Synthetic Pi", createdAt: "2026-01-01T00:00:00Z", autoUpdate: true)
+        let now = try XCTUnwrap(SignalFormat.date("2026-01-02T12:00:00Z"))
+        XCTAssertEqual(device.status(at: now), "Waiting for pairing")
+        device.enrolledAt = "2026-01-01T00:00:00Z"
+        XCTAssertEqual(device.status(at: now), "Waiting for first check-in")
+        device.lastSeenAt = "2026-01-02T11:59:00Z"
+        XCTAssertEqual(device.status(at: now), "Recently checked in")
+        device.lastSeenAt = "2026-01-02T11:00:00Z"
+        XCTAssertEqual(device.status(at: now), "Check-in overdue")
+        device.lastSeenAt = "2026-01-03T12:00:00Z"
+        XCTAssertEqual(device.status(at: now), "Check-in time unavailable")
+        device.revokedAt = "2026-01-02T12:00:00Z"
+        XCTAssertEqual(device.status(at: now), "Access revoked")
+        XCTAssertEqual(IntegrationLabel.collection("queue_full"), "Upload queue full")
+        XCTAssertEqual(IntegrationLabel.update("rolled_back"), "Previous version restored")
+    }
+
+    func testSmartcarStateActionsAndIntegrationTelemetryAreBounded() {
+        for state in ["disconnected", "awaiting_authorization", "awaiting_selection", "reconnect_required", "unknown"] {
+            XCTAssertFalse(SmartcarStatus(state: state).canSync)
+        }
+        XCTAssertTrue(SmartcarStatus(state: "provisioning").canSync)
+        XCTAssertEqual(SmartcarStatus(state: "provisioning").title, "Waiting for vehicle data")
+        XCTAssertEqual(SmartcarStatus(state: "temporary_error").title, "Update delayed")
+        XCTAssertEqual(APIClient.operation(route: "vehicles/private-vehicle/devices", method: "POST"), "device.create")
+        XCTAssertEqual(APIClient.operation(route: "devices/private-device", method: "DELETE"), "device.revoke")
+        XCTAssertEqual(APIClient.operation(route: "vehicles/private-vehicle/smartcar/sessions/private-session/complete", method: "POST"), "smartcar.session.complete")
+        XCTAssertEqual(APIClient.operation(route: "vehicles/private-vehicle/smartcar/sessions/private-session/bind", method: "POST"), "smartcar.session.bind")
+        XCTAssertNil(APIClient.operation(route: "vehicles/private-vehicle/smartcar/sessions/private-session/secret", method: "POST"))
+    }
+
+    @MainActor
+    func testCancelledSmartcarBrowserIsNotAnIntegrationError() async throws {
+        let fixture = HTTPFixture()
+        defer { fixture.close() }
+        let reported = expectation(description: "Session creation telemetry delivered")
+        fixture.configure(.json(try APIClient.body(["sessionId": integrationSession.sessionId, "authorizationUrl": integrationSession.authorizationUrl.absoluteString, "callbackScheme": integrationSession.callbackScheme, "expiresAt": integrationSession.expiresAt])), reported: reported)
+        let model = VehicleIntegrations(vehicleID: "synthetic-vehicle", client: fixture.client, browser: CancellingSmartcarBrowser())
+        await model.connect(reconnect: false)
+        await fulfillment(of: [reported], timeout: 2)
+        XCTAssertNil(model.error)
+        XCTAssertFalse(model.working)
+        XCTAssertTrue(model.candidates.isEmpty)
+        XCTAssertEqual(fixture.requests.count, 1)
+    }
+
+    @MainActor
+    func testPairingTokenIsClearedWhenLeavingIntegrationScreen() async throws {
+        let fixture = HTTPFixture()
+        defer { fixture.close() }
+        let reported = expectation(description: "Pairing telemetry delivered")
+        fixture.configure(.json(try APIClient.body(["device": ["id": "synthetic-device", "vehicleId": "synthetic-vehicle", "name": "Synthetic Pi", "createdAt": "2026-01-01T00:00:00Z", "autoUpdate": true], "enrollmentToken": "synthetic-one-time-token", "expiresAt": "2099-01-01T00:00:00Z"])), reported: reported)
+        let model = VehicleIntegrations(vehicleID: "synthetic-vehicle", client: fixture.client, browser: CancellingSmartcarBrowser())
+        await model.pair(name: "Synthetic Pi")
+        await fulfillment(of: [reported], timeout: 2)
+        XCTAssertEqual(model.pairing?.enrollmentToken, "synthetic-one-time-token")
+        XCTAssertEqual(model.devices.count, 1)
+        model.leave()
+        XCTAssertNil(model.pairing)
+        XCTAssertEqual(model.devices.first?.status(at: .now), "Waiting for pairing")
+    }
+
+    @MainActor
+    func testLeavingCancelsPendingPairingWithoutPublishingASecretOrError() async throws {
+        let fixture = HTTPFixture()
+        defer { fixture.close() }
+        let started = expectation(description: "Pairing request started")
+        let stopped = expectation(description: "Pairing transport cancelled")
+        fixture.configure(.hold, started: started, stopped: stopped)
+        let model = VehicleIntegrations(vehicleID: "synthetic-vehicle", client: fixture.client, browser: CancellingSmartcarBrowser())
+        let request = Task { await model.pair(name: "Synthetic Pi") }
+        await fulfillment(of: [started], timeout: 2)
+        model.leave()
+        await request.value
+        await fulfillment(of: [stopped], timeout: 2)
+        XCTAssertNil(model.pairing)
+        XCTAssertNil(model.error)
+        XCTAssertFalse(model.working)
+        XCTAssertTrue(fixture.events.isEmpty)
+    }
+
+    @MainActor
+    func testDeclinedSmartcarConsentRefreshesExistingBindingWithoutAnError() async throws {
+        let fixture = HTTPFixture()
+        defer { fixture.close() }
+        let reported = expectation(description: "Session, completion and three refresh telemetry events delivered")
+        reported.expectedFulfillmentCount = 5
+        fixture.configure(.routes([
+            "/api/v1/vehicles/synthetic-vehicle/smartcar/sessions": try APIClient.body(["sessionId": integrationSession.sessionId, "authorizationUrl": integrationSession.authorizationUrl.absoluteString, "callbackScheme": integrationSession.callbackScheme, "expiresAt": integrationSession.expiresAt]),
+            "/api/v1/vehicles/synthetic-vehicle/smartcar/sessions/synthetic-session/complete": try APIClient.body(["state": "cancelled", "candidates": []]),
+            "/api/v1/vehicles/synthetic-vehicle/devices": Data("[]".utf8),
+            "/api/v1/integrations/smartcar": try APIClient.body(["configured": true, "mode": "simulated", "connectAvailable": true, "pollIntervalSeconds": 3600]),
+            "/api/v1/vehicles/synthetic-vehicle/smartcar": try APIClient.body(["state": "connected", "connectionId": "existing-binding", "supportedMetrics": []])
+        ]), reported: reported)
+        let model = VehicleIntegrations(vehicleID: "synthetic-vehicle", client: fixture.client, browser: DecliningSmartcarBrowser())
+        await model.connect(reconnect: true)
+        await fulfillment(of: [reported], timeout: 2)
+        XCTAssertNil(model.error)
+        XCTAssertNil(model.message)
+        XCTAssertTrue(model.candidates.isEmpty)
+        XCTAssertEqual(model.smartcar?.connectionId, "existing-binding")
+        XCTAssertEqual(model.smartcar?.state, "connected")
+    }
+}
+
+@MainActor
+private final class CancellingSmartcarBrowser: SmartcarAuthenticating {
+    func authenticate(_ session: SmartcarSession) async throws -> URL { throw CancellationError() }
+    func cancel() {}
+}
+
+@MainActor
+private final class DecliningSmartcarBrowser: SmartcarAuthenticating {
+    func authenticate(_ session: SmartcarSession) async throws -> URL {
+        URL(string: "\(session.callbackScheme)://callback?state=expected-state&error=access_denied")!
+    }
+    func cancel() {}
+}
+
 private final class HTTPFixture {
-    enum Response { case hold, success, failure(URLError.Code), json(Data) }
+    enum Response { case hold, success, failure(URLError.Code), json(Data), routes([String: Data]) }
     let connection: Connection
     let session: URLSession
     var client: APIClient { APIClient(connection: connection, session: session) }
@@ -591,6 +741,9 @@ private final class HTTPFixture {
         case .hold: break
         case .success: respond(transport, status: 200)
         case .json(let data): respond(transport, status: 200, data: data)
+        case .routes(let data):
+            if let body = data[transport.request.url!.path] { respond(transport, status: 200, data: body) }
+            else { respond(transport, status: 404) }
         case .failure(let code): transport.client?.urlProtocol(transport, didFailWithError: URLError(code))
         }
     }
