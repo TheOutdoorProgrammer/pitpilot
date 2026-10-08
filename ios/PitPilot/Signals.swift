@@ -64,6 +64,19 @@ struct LatestSignals: Codable {
             return $0.id < $1.id
         }
     }
+    func initialHistoryDays(_ metric: String, statistic: String, now: Date = Date()) -> Int {
+        let available = readings(metric).filter { $0.statistic == statistic }
+        guard !available.isEmpty else { return 30 }
+        let cutoff = now.addingTimeInterval(-30 * 86400)
+        let cutoffDay = String(ISO8601DateFormatter().string(from: cutoff).prefix(10))
+        let hasRecentValue = available.contains { reading in
+            if let observed = reading.latest.referenceDate { return observed >= cutoff }
+            // ISO calendar dates choose a useful range without inventing an observation time.
+            if let day = reading.latest.calendarDate { return day >= cutoffDay }
+            return false
+        }
+        return hasRecentValue ? 30 : 365
+    }
 }
 
 struct SignalHistory: Codable {

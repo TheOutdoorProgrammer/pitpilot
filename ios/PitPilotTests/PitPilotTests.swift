@@ -23,6 +23,21 @@ final class PitPilotTests: XCTestCase {
         XCTAssertEqual(point.calendarDate, "2026-10-08")
     }
 
+    func testHistoryInitiallyIncludesOlderCalendarSnapshotsWithoutAssigningTime() throws {
+        let now = try XCTUnwrap(SignalFormat.date("2026-10-08T12:00:00Z"))
+        let oldSnapshot = LatestSignal(metric: "fuel_level_pct", unit: "%", source: "smartcar", statistic: "snapshot", quality: "measured",
+            latest: SignalObservation(key: "old", metric: "fuel_level_pct", unit: "%", statistic: "snapshot", quality: "measured", value: 55, calendarDate: "2026-08-15", timezone: "unknown"), stale: true)
+        let recentSample = LatestSignal(metric: "fuel_level_pct", unit: "%", source: "pi", statistic: "sample", quality: "measured",
+            latest: SignalObservation(key: "recent", metric: "fuel_level_pct", unit: "%", statistic: "sample", quality: "measured", value: 42, observedAt: "2026-10-08T11:00:00Z"), stale: true)
+        let signals = LatestSignals(asOf: "2026-10-08T12:00:00Z", definitions: [], series: [oldSnapshot, recentSample])
+        XCTAssertEqual(signals.initialHistoryDays("fuel_level_pct", statistic: "snapshot", now: now), 365)
+        XCTAssertEqual(signals.initialHistoryDays("fuel_level_pct", statistic: "sample", now: now), 30)
+        XCTAssertEqual(signals.initialHistoryDays("missing", statistic: "sample", now: now), 30)
+        XCTAssertNil(oldSnapshot.latest.referenceDate)
+        let fresh = try JSONDecoder().decode(LatestSignals.self, from: signalFixture)
+        XCTAssertEqual(fresh.initialHistoryDays("fuel_level_pct", statistic: "snapshot", now: now), 30)
+    }
+
     func testSignalStalenessAdvancesWhenCachedWithoutErasingValue() throws {
         let observed = try XCTUnwrap(SignalFormat.date("2026-10-08T12:00:00.125Z"))
         let definition = SignalDefinition(metric: "rpm", label: "Engine speed", unit: "rpm", staleAfterSeconds: 900)

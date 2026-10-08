@@ -118,7 +118,9 @@ struct SignalHistoryView: View {
         self.vehicleID = vehicleID
         self.metric = metric
         self.latest = latest
-        _statistic = State(initialValue: latest.readings(metric).first?.statistic ?? "sample")
+        let initialStatistic = latest.readings(metric).first?.statistic ?? "sample"
+        _statistic = State(initialValue: initialStatistic)
+        _days = State(initialValue: latest.initialHistoryDays(metric, statistic: initialStatistic))
     }
     private var statistics: [String] {
         Array(Set(latest.readings(metric).map(\.statistic))).sorted { SignalFormat.rank($0) < SignalFormat.rank($1) }

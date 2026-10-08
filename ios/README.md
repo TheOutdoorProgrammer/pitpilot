@@ -43,6 +43,8 @@ Network operations create W3C trace context for server correlation and emit boun
 
 Vehicle Overview shows only metrics with stored values. Tap fuel, manifold pressure, or another metric to choose a reading type and history range. Cards identify source, quality, and the authentic observation time or reporting period. Stale readings retain their value and gain a stale label. Daily or other period summaries remain explicitly historical.
 
+History initially shows 30 days for recent readings, or one year when the selected reading type only has older values, so older imported snapshots are visible immediately. You can change the range using the picker. Calendar-only dates remain dates when choosing this default; they do not acquire a fabricated observation time.
+
 History charts preserve timestamped sample endpoints and bucket minimum/maximum ranges without connecting gaps. Calendar-date snapshots use a separate categorical day chart, with unknown time and timezone clearly labeled; the app does not invent midnight observation times. Expand chart values to inspect the numeric envelopes and actual time bounds. Loaded ranges remain readable offline, and a signal refresh failure does not mark unrelated garage functions offline. Collection details expose available diagnostic codes, missing-data coverage and recording segments without interpreting unknown diagnostic results as successful reads.
 
 History searches titles, notes, tags, and custom fields. Filter by record type and open an entry to read its full notes, custom fields, and source reference. Undated notes remain undated and do not display invented mileage or spending. Odometer entries distinguish initial and final readings and retain whether the reading was measured, estimated, or unspecified.
