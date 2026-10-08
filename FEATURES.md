@@ -2,6 +2,22 @@
 
 Unchecked items are planned. This checklist separates the replacement baseline from later enhancements and the optional paid AI offering. Items can be split into issues as implementation begins; completed items should link to their verification evidence.
 
+## First usable release
+
+These smaller milestones track the first deployment without claiming full completion of the replacement baseline below.
+
+- [x] Implement persistent vehicle CRUD with authenticated household access and regression coverage for concurrent edits.
+- [x] Record service, repairs, upgrades, fuel, expenses, and notes with validated dates, mileage, and integer costs.
+- [x] Create date or mileage reminders and mark them complete.
+- [x] Store recorded trips with validated GPS coordinates and provide a consistent household JSON export.
+- [ ] Verify the native garage, records, reminders, trip maps, secure connection, and offline reading flows.
+- [ ] Publish signed iOS builds through Quill and Fledge.
+- [ ] Build backend binaries with GoReleaser inside Quill and copy them into the runtime container.
+- [ ] Deploy the image through Flux and verify authenticated behavior and persistence after restart.
+- [ ] Verify backend and relayed native request observations in Grafana without personal data in telemetry.
+
+Backend validation: `go test -race ./...`, `go vet ./...`, and `govulncheck`; the end-to-end API tests cover record lifecycle, export, authentication, validation, persistence, concurrent edits, and the client telemetry allowlist. These checks gate publication in the [Release workflow](.github/workflows/release.yml).
+
 ## Product decisions
 
 - [x] Confirm PitPilot, paid CrewChief AI, and repository ownership under TheOutdoorProgrammer.

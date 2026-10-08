@@ -2,13 +2,15 @@
 
 Vehicle maintenance, trip history, and connected vehicle data, with a Go backend and a native iOS app.
 
-PitPilot is being planned as a replacement for LubeLogger that brings maintenance records and driving history into one application. Connect a supported vehicle through Smartcar or use a Raspberry Pi with an OBD adapter. Record data when connectivity is unavailable and sync it when the connection returns.
+PitPilot brings maintenance records and driving history into one application. The first release provides a native garage and a persistent Go API. Built-in Smartcar and Raspberry Pi collection are planned next; the full replacement scope is tracked in the [feature checklist](FEATURES.md).
 
-The Raspberry Pi setup should be manageable from the app: pair a device, assign a vehicle, check its connections, and see whether data has uploaded. Routine setup and troubleshooting should not require SSH.
+The planned Raspberry Pi integration includes app-guided setup, offline collection, and automatic signed updates with rollback. Routine setup and troubleshooting should not require SSH.
 
 ## Status
 
-This repository starts with a [feature checklist](FEATURES.md). There is no installable application yet. Features described here are planned.
+Early development. The current implementation supports vehicles, service and fuel records, reminders, recorded-trip display, and JSON export. The iOS app stores its access token in Keychain and caches records for offline reading. It does not queue offline changes.
+
+Automatic vehicle ingestion, receipt attachments, recurring reminders, push notifications, LubeLogger migration, and CrewChief AI remain unfinished. Existing vehicle integrations should continue running until migration and replacement acceptance checks pass.
 
 ## What we're building
 
@@ -30,9 +32,44 @@ The proposed product split keeps ordinary recordkeeping, device ingestion, maps,
 
 ## Technical direction
 
-The backend will use Go, and the iOS app will be native. A Raspberry Pi collector will upload authenticated observations to the backend. Existing collection and integration code will be evaluated for reuse before new implementations are written.
+The backend uses Go and SQLite. Deploy one replica with a persistent volume; the API accepts a high-entropy household token. The native app uses SwiftUI and MapKit. See the [API contract](docs/api.md) and [architecture decision](adr/0001-start-with-a-single-household-go-service-and-native-ios-clie.md).
 
-Database choice, hosting, authentication, and the app's minimum iOS version still need decisions. Self-hosting is a proposed requirement. Consequential architecture choices will be recorded in ADRs once evaluated.
+The initial authentication model grants access to the whole household. Per-person accounts and vehicle permissions remain planned. A future Raspberry Pi collector will upload authenticated observations; existing collection code will be evaluated for reuse before that implementation begins.
+
+## Run the backend
+
+Install the Go version in `go.mod`. Create a token outside the checkout and start the service:
+
+```sh
+umask 077
+mkdir -p "$HOME/.config/pitpilot"
+openssl rand -hex 32 > "$HOME/.config/pitpilot/api-token"
+export PITPILOT_API_TOKEN_FILE="$HOME/.config/pitpilot/api-token"
+export PITPILOT_DB="$HOME/.local/share/pitpilot/pitpilot.db"
+go run ./cmd/pitpilot
+```
+
+The service listens on port 8080. Put it behind HTTPS before connecting the native app. Enter the server URL and token in the app; never compile an access token into it. Rotating the token requires restarting the backend and reconnecting clients.
+
+`PITPILOT_ADDR` changes the listen address. `PITPILOT_API_TOKEN` is also supported for deployments that inject secrets as environment variables. Set the standard `OTEL_EXPORTER_OTLP_ENDPOINT` and authentication headers in deployment secrets to export logs and traces. The app relays only bounded request observations through the authenticated API; it carries no general telemetry credentials.
+
+The database directory contains personal records and location data. [Back it up and verify restoration](docs/api.md#export-and-backup) before upgrades. JSON export is available through the API; importing those exports is not implemented yet.
+
+## Build and test
+
+```sh
+go test -race ./...
+go vet ./...
+go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
+brew install xcodegen
+xcodegen generate --spec ios/project.yml
+xcodebuild test -project ios/PitPilot.xcodeproj -scheme PitPilot \
+  -destination 'platform=iOS Simulator,name=iPhone 17'
+```
+
+The Release workflow signs and stages the iOS app, then uses [Quill](https://github.com/TheOutdoorProgrammer/quill) to publish it through [Fledge](https://github.com/TheOutdoorProgrammer/fledge), build Go artifacts with GoReleaser, and publish the container. The Dockerfile copies the prebuilt Go artifacts; it never compiles Go. Release credentials and deployment endpoints are injected through repository secrets.
+
+Self-hosters can build locally with `goreleaser build --snapshot --clean`, then `docker build --build-arg TARGETARCH=amd64 -t pitpilot:local .`. Mount the database directory, supply a token secret, and run only one server against a database. Container publishing and deployment promotion are separate operations; use the published digest in GitOps.
 
 ## Location and vehicle support
 
