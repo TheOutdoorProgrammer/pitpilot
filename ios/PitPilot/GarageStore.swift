@@ -52,8 +52,12 @@ final class GarageStore: ObservableObject {
     @Published var error: String?
     private let secure = SecureConnection()
     private let cacheURL: URL
+    private let session: URLSession?
+    private var refreshTask: Task<[Vehicle], Error>?
+    private var refreshID: UUID?
 
     init() {
+        session = nil
         var filename = "garage.json"
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("--ui-testing") { filename = "garage-ui-test.json" }
@@ -78,9 +82,17 @@ final class GarageStore: ObservableObject {
         #endif
     }
 
+    init(connection: Connection, cache: GarageCache, offline: Bool = false, cacheURL: URL, session: URLSession) {
+        self.connection = connection
+        self.cache = cache
+        self.offline = offline
+        self.cacheURL = cacheURL
+        self.session = session
+    }
+
     var vehicles: [Vehicle] { cache.vehicles }
     func detail(_ id: String) -> VehicleDetail { cache.details[id] ?? VehicleDetail() }
-    private var client: APIClient? { connection.map { APIClient(connection: $0) } }
+    private var client: APIClient? { connection.map { APIClient(connection: $0, session: session) } }
     private func isCurrent(_ client: APIClient) -> Bool {
         connection?.server == client.connection.server && connection?.token == client.connection.token
     }
@@ -107,12 +119,27 @@ final class GarageStore: ObservableObject {
     }
 
     func refresh() async {
-        guard let client, !refreshing else { return }
+        guard !Task.isCancelled, let client else { return }
+        // A replacement view or pull gesture must not be dropped while an old task unwinds.
+        refreshTask?.cancel()
+        let id = UUID()
+        let task = Task<[Vehicle], Error> { try await client.request("vehicles") }
+        refreshID = id
+        refreshTask = task
         refreshing = true
-        defer { refreshing = false }
+        defer {
+            if refreshID == id {
+                refreshing = false
+                refreshTask = nil
+                refreshID = nil
+            }
+        }
         do {
-            let vehicles: [Vehicle] = try await client.request("vehicles")
-            guard isCurrent(client) else { return }
+            let vehicles = try await withTaskCancellationHandler {
+                try await task.value
+            } onCancel: { task.cancel() }
+            try Task.checkCancellation()
+            guard isCurrent(client), refreshID == id else { return }
             cache.vehicles = vehicles
             let ids = Set(cache.vehicles.map(\.id))
             cache.details = cache.details.filter { ids.contains($0.key) }
@@ -120,7 +147,9 @@ final class GarageStore: ObservableObject {
             offline = false
             error = nil
             persist()
-        } catch { if isCurrent(client) { offline = true; self.error = error.localizedDescription } }
+        } catch is CancellationError {
+            // SwiftUI cancels view-owned refreshes when navigation changes their lifetime.
+        } catch { if isCurrent(client), refreshID == id { offline = true; self.error = error.localizedDescription } }
     }
 
     func refreshDetail(_ id: String) async {
@@ -130,12 +159,15 @@ final class GarageStore: ObservableObject {
             async let reminders: [Reminder] = client.request("vehicles/\(id)/reminders")
             async let trips: [Trip] = client.request("vehicles/\(id)/trips")
             let detail = try await VehicleDetail(records: records, reminders: reminders, trips: trips)
+            try Task.checkCancellation()
             guard isCurrent(client) else { return }
             cache.details[id] = detail
             cache.updatedAt = Date()
             offline = false
             error = nil
             persist()
+        } catch is CancellationError {
+            // Keep the last known connection state and cached detail intact.
         } catch { if isCurrent(client) { offline = true; self.error = error.localizedDescription } }
     }
 

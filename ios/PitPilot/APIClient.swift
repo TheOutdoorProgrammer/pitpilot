@@ -40,7 +40,8 @@ final class NoRedirect: NSObject, URLSessionTaskDelegate {
 
 struct APIClient {
     let connection: Connection
-    private static let session: URLSession = {
+    private let session: URLSession
+    private static let defaultSession: URLSession = {
         let config = URLSessionConfiguration.ephemeral
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("--ui-testing") { config.protocolClasses = [UITestProtocol.self] }
@@ -49,6 +50,11 @@ struct APIClient {
     }()
     private static let logger = Logger(subsystem: "com.theoutdoorprogrammer.pitpilot", category: "api")
 
+    init(connection: Connection, session: URLSession? = nil) {
+        self.connection = connection
+        self.session = session ?? Self.defaultSession
+    }
+
     func request<T: Decodable>(_ route: String, method: String = "GET", body: Data? = nil) async throws -> T {
         let data = try await send(route, method: method, body: body)
         do { return try JSONDecoder().decode(T.self, from: data) }
@@ -56,8 +62,11 @@ struct APIClient {
     }
 
     func send(_ route: String, method: String = "GET", body: Data? = nil) async throws -> Data {
+        try Task.checkCancellation()
         let started = Date()
         var statusCode = 0
+        var cancelled = false
+        var failureKind: String?
         var request = URLRequest(url: connection.server.appendingPathComponent("api/v1/" + route))
         request.httpMethod = method
         request.httpBody = body
@@ -69,14 +78,16 @@ struct APIClient {
         let spanID = String(UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased().prefix(16))
         request.setValue("00-\(traceID)-\(spanID)-01", forHTTPHeaderField: "traceparent")
         defer {
-            if let operation = Self.operation(route: route, method: method) {
+            if !cancelled, let operation = Self.operation(route: route, method: method) {
                 let elapsed = min(120_000, max(0, Int(Date().timeIntervalSince(started) * 1000)))
                 let eventStatus = statusCode
-                Task { await report(operation: operation, duration: elapsed, status: eventStatus, traceparent: "00-\(traceID)-\(spanID)-01") }
+                let eventFailure = failureKind
+                Task { await report(operation: operation, duration: elapsed, status: eventStatus, failureKind: eventFailure, traceparent: "00-\(traceID)-\(spanID)-01") }
             }
         }
         do {
-            let (data, response) = try await Self.session.data(for: request)
+            let (data, response) = try await session.data(for: request)
+            try Task.checkCancellation()
             guard let response = response as? HTTPURLResponse else { throw APIError.message("The server did not send an HTTP response.") }
             statusCode = response.statusCode
             Self.logger.info("api_request method=\(method, privacy: .public) status=\(response.statusCode) trace_id=\(traceID, privacy: .public) span_id=\(spanID, privacy: .public)")
@@ -87,9 +98,31 @@ struct APIClient {
             case 400, 422: throw APIError.message("The server could not accept these values. Check the form and try again.")
             default: throw APIError.message("The server could not complete the request (\(response.statusCode)). Try again shortly.")
             }
-        } catch let error as URLError {
-            Self.logger.error("api_transport_failure code=\(error.code.rawValue) trace_id=\(traceID, privacy: .public) span_id=\(spanID, privacy: .public)")
-            throw APIError.message("Couldn't reach your server. Check your connection and try again. Saved data remains available.")
+        } catch {
+            if error is CancellationError || (error as? URLError)?.code == .cancelled || Task.isCancelled {
+                cancelled = true
+                throw CancellationError()
+            }
+            if let transport = error as? URLError {
+                let kind = Self.failureKind(for: transport.code)
+                failureKind = kind
+                Self.logger.error("api_transport_failure kind=\(kind, privacy: .public) trace_id=\(traceID, privacy: .public) span_id=\(spanID, privacy: .public)")
+                throw APIError.message("Couldn't reach your server. Check your connection and try again. Saved data remains available.")
+            }
+            throw error
+        }
+    }
+
+    static func failureKind(for code: URLError.Code) -> String {
+        switch code {
+        case .cannotFindHost, .dnsLookupFailed: return "dns"
+        case .timedOut: return "timeout"
+        case .cannotConnectToHost, .networkConnectionLost: return "connection"
+        case .secureConnectionFailed, .serverCertificateHasBadDate, .serverCertificateUntrusted,
+             .serverCertificateHasUnknownRoot, .serverCertificateNotYetValid,
+             .clientCertificateRejected, .clientCertificateRequired: return "tls"
+        case .notConnectedToInternet, .dataNotAllowed, .internationalRoamingOff: return "offline"
+        default: return "other"
         }
     }
 
@@ -117,17 +150,19 @@ struct APIClient {
         return nil
     }
 
-    private func report(operation: String, duration: Int, status: Int, traceparent: String) async {
+    private func report(operation: String, duration: Int, status: Int, failureKind: String?, traceparent: String) async {
         var request = URLRequest(url: connection.server.appendingPathComponent("api/v1/client-events"))
         request.httpMethod = "POST"
         request.timeoutInterval = 5
         request.setValue("Bearer \(connection.token)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue(traceparent, forHTTPHeaderField: "traceparent")
-        request.httpBody = try? Self.body(["operation": operation, "durationMs": duration, "statusCode": status])
+        var event: [String: Any] = ["operation": operation, "durationMs": duration, "statusCode": status]
+        if let failureKind { event["failureKind"] = failureKind }
+        request.httpBody = try? Self.body(event)
         // No recursive instrumentation, retry queue, or sensitive request metadata.
         do {
-            let (_, response) = try await Self.session.data(for: request)
+            let (_, response) = try await session.data(for: request)
             if let response = response as? HTTPURLResponse, response.statusCode != 204 {
                 Self.logger.notice("client_event_delivery_failed status=\(response.statusCode)")
             }

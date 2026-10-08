@@ -266,6 +266,10 @@ func TestClientTelemetryHasStrictBoundedSchema(t *testing.T) {
 	}{
 		{`{"operation":"vehicles.list","durationMs":15,"statusCode":200}`, 204},
 		{`{"operation":"vehicle.create","durationMs":50,"statusCode":0}`, 204},
+		{`{"operation":"vehicles.list","durationMs":5,"statusCode":0,"failureKind":"dns"}`, 204},
+		{`{"operation":"vehicles.list","durationMs":5,"statusCode":0,"failureKind":"cancelled"}`, 422},
+		{`{"operation":"vehicles.list","durationMs":5,"statusCode":0,"failureKind":"private-hostname"}`, 422},
+		{`{"operation":"vehicles.list","durationMs":5,"statusCode":200,"failureKind":"offline"}`, 422},
 		{`{"operation":"private-vehicle-id","durationMs":15,"statusCode":200}`, 422},
 		{`{"operation":"vehicles.list","durationMs":120001,"statusCode":200}`, 422},
 		{`{"operation":"vehicles.list","durationMs":15,"statusCode":999}`, 422},
@@ -275,5 +279,36 @@ func TestClientTelemetryHasStrictBoundedSchema(t *testing.T) {
 		if w.Code != tc.status {
 			t.Fatalf("%s: got %d expected %d", tc.body, w.Code, tc.status)
 		}
+	}
+}
+
+func TestClientFailureTelemetryDoesNotLogUnvalidatedData(t *testing.T) {
+	s, _ := fixture(t)
+	var logs bytes.Buffer
+	h, err := New(s, testToken, slog.New(slog.NewJSONHandler(&logs, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := request(h, "POST", "/api/v1/client-events", `{"operation":"vehicles.list","durationMs":10,"statusCode":0,"failureKind":"timeout"}`)
+	if w.Code != 204 {
+		t.Fatalf("valid failure: %d", w.Code)
+	}
+	var entry map[string]any
+	for _, line := range bytes.Split(bytes.TrimSpace(logs.Bytes()), []byte("\n")) {
+		var candidate map[string]any
+		if err := json.Unmarshal(line, &candidate); err != nil {
+			t.Fatal(err)
+		}
+		if candidate["msg"] == "client request failed" {
+			entry = candidate
+		}
+	}
+	if entry["level"] != "WARN" || entry["failure_kind"] != "timeout" || entry["operation"] != "vehicles.list" {
+		t.Fatalf("missing bounded failure: %v", entry)
+	}
+	logs.Reset()
+	w = request(h, "POST", "/api/v1/client-events", `{"operation":"vehicles.list","durationMs":10,"statusCode":0,"failureKind":"private-hostname"}`)
+	if w.Code != 422 || bytes.Contains(logs.Bytes(), []byte("private-hostname")) {
+		t.Fatal("unvalidated failure metadata was accepted or logged")
 	}
 }

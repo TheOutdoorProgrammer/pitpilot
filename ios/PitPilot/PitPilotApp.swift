@@ -162,7 +162,7 @@ struct SettingsView: View {
                     Button("Disconnect and clear saved data", role: .destructive) { confirm = true }
                 }
                 Section("About") {
-                    LabeledContent("PitPilot", value: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.1.0")
+                    LabeledContent("PitPilot", value: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.1.1")
                     LabeledContent("Build", value: Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1")
                     Text("A home for every mile.").foregroundStyle(.secondary)
                 }
