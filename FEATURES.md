@@ -12,14 +12,18 @@ These smaller milestones track the first deployment without claiming full comple
 - [x] Store recorded trips with validated GPS coordinates and provide a consistent household JSON export.
 - [x] Verify secure native connection, vehicle creation, service entry, history, and the trips empty state on standard and compact iPhone simulators.
 - [x] Verify populated native trip maps, reminder completion, and cached reading during a server outage.
-- [ ] Publish signed iOS builds through Quill and Fledge.
-- [ ] Build backend binaries with GoReleaser inside Quill and copy them into the runtime container.
-- [ ] Deploy the image through Flux and verify authenticated behavior and persistence after restart.
-- [ ] Verify backend and relayed native request observations in Grafana without personal data in telemetry.
+- [x] Publish signed iOS builds through Quill and Fledge.
+- [x] Build backend binaries with GoReleaser inside Quill and copy them into the runtime container.
+- [x] Deploy the image through Flux and verify authenticated behavior and persistence after restart.
+- [x] Verify backend and relayed native request observations in Grafana without personal data in telemetry.
 
 Backend validation: `go test -race ./...`, `go vet ./...`, and `govulncheck`; the end-to-end API tests cover record lifecycle, export, authentication, validation, persistence, concurrent edits, and the client telemetry allowlist. These checks gate publication in the [Release workflow](.github/workflows/release.yml).
 
-Native validation: six [unit tests](ios/PitPilotTests/PitPilotTests.swift) and the basic [garage UI journey](ios/PitPilotUITests/PitPilotUITests.swift) pass on iPhone 17 and iPhone SE simulators. The expanded iPhone 17 suite also verifies reminder completion, a synthetic recorded route rendered in MapKit, and cached vehicle, service, and reminder reads after offline relaunch with writes disabled. Both GitHub iOS jobs use the repository's self-hosted runner; execution there is pending runner enrollment.
+Native validation: six [unit tests](ios/PitPilotTests/PitPilotTests.swift) and the basic [garage UI journey](ios/PitPilotUITests/PitPilotUITests.swift) pass on iPhone 17 and iPhone SE simulators. The expanded iPhone 17 suite also verifies reminder completion, a synthetic recorded route rendered in MapKit, and cached vehicle, service, and reminder reads after offline relaunch with writes disabled. The full suite passed on the repository's self-hosted macOS runner in both [CI](https://github.com/TheOutdoorProgrammer/pitpilot/actions/runs/37798195739) and the [first release](https://github.com/TheOutdoorProgrammer/pitpilot/actions/runs/37815555940).
+
+Release validation: [v0.1.0](https://github.com/TheOutdoorProgrammer/pitpilot/releases/tag/v0.1.0) includes Linux AMD64 and ARM64 binaries built by GoReleaser through Quill. The runtime image copies those artifacts and checks their version. The signed iOS app is version 0.1.0, build 1; strict signature verification passed, and the IPA downloaded from Fledge matches the staged artifact's SHA-256. Ad Hoc installation requires a device included in the provisioning profile.
+
+Deployment validation: the immutable release passed HTTPS and authentication checks after Flux reconciliation. A synthetic vehicle and service record survived replacement of the running pod, then were removed. Grafana received correlated request, datastore, and native-relay observations with version 0.1.0 and route templates. Inspected trace attributes and log fields contained no record identifiers, coordinates, bodies, credentials, or query strings. The native relay was exercised with a synthetic client event; a physical phone session has not been verified. Retained local storage is not an off-node backup.
 
 ## Product decisions
 
