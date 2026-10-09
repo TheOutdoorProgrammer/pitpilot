@@ -124,3 +124,50 @@ func TestClockAndAdapterFailureAreDistinct(t *testing.T) {
 		t.Fatal(s)
 	}
 }
+
+type recoveredSampler struct {
+	cancel context.CancelFunc
+	closed bool
+}
+
+func (s *recoveredSampler) SampleDetails(context.Context) (obd.Observation, error) {
+	s.cancel()
+	return obd.Observation{Readings: map[string]float64{"rpm": 800}}, nil
+}
+
+func (s *recoveredSampler) Close() error { s.closed = true; return nil }
+
+func TestAdapterOpenFailureWithTypedNilRetriesAndCollects(t *testing.T) {
+	dir := t.TempDir()
+	marker := filepath.Join(dir, "clock")
+	if err := os.WriteFile(marker, nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	q, err := OpenQueue(dir, "pi", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer q.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	adapter := &recoveredSampler{cancel: cancel}
+	attempts := 0
+	state := &runtimeState{}
+	collect(ctx, Config{TimeSyncMarker: marker}, q, state, func(context.Context) (Sampler, error) {
+		attempts++
+		if attempts == 1 {
+			var unavailable *obd.Device
+			return unavailable, errors.New("adapter initialization failed")
+		}
+		return adapter, nil
+	})
+	if attempts != 2 || !adapter.closed {
+		t.Fatalf("attempts=%d closed=%v", attempts, adapter.closed)
+	}
+	if state, _ := state.state(); state != "collecting" {
+		t.Fatalf("state=%s", state)
+	}
+	if n, _, err := q.Status(); err != nil || n != 1 {
+		t.Fatalf("queued=%d error=%v", n, err)
+	}
+}

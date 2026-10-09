@@ -166,13 +166,15 @@ func collect(ctx context.Context, c Config, q *Queue, state *runtimeState, open 
 		err := diag.Operation(operation, "obd.sample", func(ctx context.Context) error {
 			var err error
 			if device == nil {
-				device, err = open(ctx)
+				candidate, err := open(ctx)
 				if err != nil {
 					return err
 				}
-				if device == nil {
+				if candidate == nil {
 					return errors.New("adapter unavailable")
 				}
+				// A failed open may return a typed nil; only retain a successfully opened device.
+				device = candidate
 			}
 			sample, err = device.SampleDetails(ctx)
 			if errors.Is(err, obd.ErrECUUnavailable) {
