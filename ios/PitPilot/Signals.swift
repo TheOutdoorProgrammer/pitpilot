@@ -102,7 +102,7 @@ struct SignalHistory: Codable {
     let maxPoints: Int
     let series: [SignalHistorySeries]
 
-    static let trendStatistics: Set<String> = ["sample", "snapshot"]
+    static let trendStatistics: Set<String> = ["sample", "snapshot", "mean"]
     func displayedSeries(_ statistic: String) -> [SignalHistorySeries] {
         series.filter { statistic == "trend" ? Self.trendStatistics.contains($0.statistic) : $0.statistic == statistic }
     }
@@ -134,15 +134,7 @@ struct SignalHistoryPoint: Codable, Identifiable {
     var lastObservedAt: String?
     var calendarDate: String?
     var timezone: String?
-    var maxGapSeconds: Double?
-    var minimumObservedAt: String?
-    var maximumObservedAt: String?
     var id: String { calendarDate ?? bucketStart ?? "unknown" }
-}
-
-enum SignalChartPolicy {
-    static let slowMetrics: Set<String> = ["fuel_level_pct", "battery_soc_pct", "odometer_km"]
-    static func maximumJoinGapSeconds(_ metric: String) -> Int { slowMetrics.contains(metric) ? 900 : 30 }
 }
 
 enum SignalChartKind: Equatable {
@@ -190,11 +182,6 @@ struct SignalChartBucket: Identifiable {
     var origin: SignalHistorySeries?
     var id: String { (origin.map { $0.id + "/" } ?? "") + point.id }
     var center: Double { (start + end) / 2 }
-    func hasContinuousCoverage(maximumGap: Int) -> Bool {
-        guard !calendar else { return false }
-        let gap = point.maxGapSeconds ?? end - start
-        return gap.isFinite && gap >= 0 && gap <= Double(maximumGap)
-    }
     var state: String {
         guard point.count > 0, [0, 1].contains(point.minimum), [0, 1].contains(point.maximum), point.minimum <= point.maximum else { return "Unknown" }
         if point.minimum != point.maximum { return "Mixed" }
@@ -214,7 +201,6 @@ struct SignalChartVertex: Identifiable {
     let segment: String
     var calendarDay = false
     var estimated = false
-    var summary = false
 }
 
 struct SignalStateMark: Identifiable {
@@ -232,38 +218,32 @@ struct SignalChartData {
     let kind: SignalChartKind
     let statistic: String
     let valueLabels: [String: String]?
-    let maximumJoinGapSeconds: Int
     var sparseVertices: [SignalChartVertex] = []
     var hasCalendarDays = false
-
-    func shadesRange(_ bucket: SignalChartBucket) -> Bool {
-        kind == .trend && (bucket.origin?.statistic ?? statistic) == "sample" && bucket.hasContinuousCoverage(maximumGap: maximumJoinGapSeconds)
-    }
 
     init(history: SignalHistory, statistic: String, valueLabels: [String: String]? = nil) {
         self.valueLabels = valueLabels
         self.statistic = statistic
-        maximumJoinGapSeconds = SignalChartPolicy.maximumJoinGapSeconds(history.metric)
         calendar = false
         kind = .resolve(unit: history.displayedUnit(statistic), statistic: statistic)
         var allBuckets: [SignalChartBucket] = []
         var allVertices: [SignalChartVertex] = []
         var sparse: [SignalChartVertex] = []
         var hasDays = false
-        let connectsDays = SignalChartPolicy.slowMetrics.contains(history.metric)
+        var extents: [(first: SignalChartVertex, last: SignalChartVertex)] = []
         for series in history.displayedSeries(statistic) {
             for calendar in [false, true] {
-                let layer = SignalChartData(series: series, unit: history.displayedUnit(statistic), calendar: calendar,
-                    maximumJoinGapSeconds: SignalChartPolicy.maximumJoinGapSeconds(history.metric), valueLabels: valueLabels, connectCalendarDays: connectsDays)
+                let layer = SignalChartData(series: series, unit: history.displayedUnit(statistic), calendar: calendar, valueLabels: valueLabels)
                 // Noon is only a drawing position within an unknown-time day, never an observation timestamp.
                 func position(_ x: Double) -> Double { calendar ? x * 86400 + 43200 : x }
                 allBuckets += layer.buckets.map { SignalChartBucket(point: $0.point, start: position($0.start), end: position($0.end), calendar: calendar, origin: series) }
-                let vertices = layer.vertices.map { SignalChartVertex(id: series.id + "/" + $0.id, x: position($0.x), value: $0.value, segment: $0.segment + "/\(calendar)", calendarDay: calendar, estimated: series.quality == "estimated", summary: series.statistic != "sample" && series.statistic != "snapshot") }
+                let vertices = layer.vertices.map { SignalChartVertex(id: series.id + "/" + $0.id, x: position($0.x), value: $0.value, segment: $0.segment + "/\(calendar)", calendarDay: calendar, estimated: series.quality == "estimated") }
                 allVertices += vertices
+                if let first = vertices.first, let last = vertices.last { extents.append((first, last)) }
                 if calendar, !layer.buckets.isEmpty { hasDays = true }
-                // Only slowly changing daily snapshots get bounded guides. Instantaneous speed across missing drives has no meaningful interpolation.
-                if connectsDays, calendar, series.statistic == "snapshot", layer.kind == .trend {
-                    for pair in zip(vertices, vertices.dropFirst()) where pair.0.segment != pair.1.segment && pair.1.x - pair.0.x <= 7 * 86400 {
+                // Dotted guides make sparse historical trends readable without shading unknown coverage.
+                if layer.kind == .trend {
+                    for pair in zip(vertices, vertices.dropFirst()) where pair.0.segment != pair.1.segment {
                         let segment = "gap/" + pair.1.id
                         sparse += [
                             SignalChartVertex(id: segment + "/start", x: pair.0.x, value: pair.0.value, segment: segment),
@@ -273,16 +253,27 @@ struct SignalChartData {
                 }
             }
         }
+        // Join nonoverlapping source eras with a guide, never join overlapping providers into a false zigzag.
+        var preceding: SignalChartVertex?
+        for extent in extents.sorted(by: { $0.first.x < $1.first.x }) {
+            if let previous = preceding, previous.x < extent.first.x, previous.estimated == extent.first.estimated {
+                let segment = "source-gap/" + extent.first.id
+                sparse += [
+                    SignalChartVertex(id: segment + "/start", x: previous.x, value: previous.value, segment: segment),
+                    SignalChartVertex(id: segment + "/end", x: extent.first.x, value: extent.first.value, segment: segment)
+                ]
+            }
+            if preceding == nil || extent.last.x > preceding!.x { preceding = extent.last }
+        }
         buckets = allBuckets.sorted { $0.start == $1.start ? $0.id < $1.id : $0.start < $1.start }
         vertices = allVertices.sorted { $0.x == $1.x ? $0.id < $1.id : $0.x < $1.x }
         sparseVertices = sparse
         hasCalendarDays = hasDays
     }
 
-    init(series: SignalHistorySeries, unit: String, calendar: Bool, maximumJoinGapSeconds: Int = 900, valueLabels: [String: String]? = nil, connectCalendarDays: Bool = true) {
+    init(series: SignalHistorySeries, unit: String, calendar: Bool, maximumJoinGapSeconds: Int = 900, valueLabels: [String: String]? = nil) {
         self.valueLabels = valueLabels
         self.calendar = calendar
-        self.maximumJoinGapSeconds = maximumJoinGapSeconds
         statistic = series.statistic
         kind = .resolve(unit: unit, statistic: series.statistic)
         buckets = series.points.compactMap { point in
@@ -312,27 +303,20 @@ struct SignalChartData {
                    let last = bucket.point.lastObservedAt.flatMap(SignalFormat.date) {
                     values.append((last.timeIntervalSince1970, bucket.point.last))
                 }
-                for (timestamp, value) in [(bucket.point.minimumObservedAt, bucket.point.minimum), (bucket.point.maximumObservedAt, bucket.point.maximum)] {
-                    if let date = timestamp.flatMap(SignalFormat.date), !values.contains(where: { $0.0 == date.timeIntervalSince1970 && $0.1 == value }) {
-                        values.append((date.timeIntervalSince1970, value))
-                    }
-                }
-                values.sort { $0.0 == $1.0 ? $0.1 < $1.1 : $0.0 < $1.0 }
             }
             let missingBucket: Bool
             if let previous {
-                if calendar { missingBucket = !connectCalendarDays || bucket.start - previous.end > 1 }
+                if calendar { missingBucket = bucket.start - previous.end > 1 }
                 else if series.statistic == "sample",
                         let end = previous.point.bucketEnd.flatMap(SignalFormat.date),
                         let start = bucket.point.bucketStart.flatMap(SignalFormat.date) {
                     missingBucket = start.timeIntervalSince(end) > 0.001
-                } else { missingBucket = true }
+                } else { missingBucket = bucket.start > previous.end }
             } else { missingBucket = false }
             if missingBucket { segment += 1 }
             for (index, value) in values.enumerated() {
-                // A retained first/min/max/last pair can span a dense bucket only when its actual maximum raw gap confirms coverage.
-                let insideCoveredBucket = index > 0 && bucket.hasContinuousCoverage(maximumGap: maximumJoinGapSeconds)
-                if !calendar, series.statistic == "sample", !insideCoveredBucket, let lastX, value.0 - lastX > Double(maximumJoinGapSeconds) { segment += 1 }
+                // This is a conservative drawing limit, not a claim about source sampling cadence.
+                if !calendar, series.statistic == "sample", let lastX, value.0 - lastX > Double(maximumJoinGapSeconds) { segment += 1 }
                 result.append(SignalChartVertex(id: "\(bucket.id)/\(index)", x: value.0, value: value.1, segment: "\(series.id)/\(segment)"))
                 lastX = value.0
             }
@@ -348,7 +332,7 @@ struct SignalChartData {
             if bucket.calendar || (bucket.origin?.statistic ?? statistic) != "sample" {
                 return [SignalStateMark(id: bucket.id, start: bucket.center, end: bucket.center, label: label, summary: true)]
             }
-            if bucket.hasContinuousCoverage(maximumGap: maximumJoinGapSeconds) {
+            if bucket.end - bucket.start <= 900 {
                 return [SignalStateMark(id: bucket.id, start: bucket.start, end: bucket.end, label: label, summary: false)]
             }
             var marks: [SignalStateMark] = []

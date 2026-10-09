@@ -37,6 +37,7 @@ struct SecureConnection {
 }
 
 struct GarageCache: Codable {
+    static let currentSignalCacheGeneration = 1
     var vehicles: [Vehicle] = []
     var details: [String: VehicleDetail] = [:]
     var updatedAt: Date?
@@ -45,6 +46,16 @@ struct GarageCache: Codable {
     var signalHistory: [String: SignalHistory]?
     var locations: [String: VehicleLocationEnvelope]?
     var hiddenDashboardMetrics: [String: Set<String>]?
+    var signalCacheGeneration: Int? = GarageCache.currentSignalCacheGeneration
+
+    @discardableResult mutating func invalidateOutdatedSignalCache() -> Bool {
+        guard signalCacheGeneration != Self.currentSignalCacheGeneration else { return false }
+        // Recovered historical readings used the native Pi source, so source-name filtering cannot remove every retired reading.
+        signals = nil
+        signalHistory = nil
+        signalCacheGeneration = Self.currentSignalCacheGeneration
+        return true
+    }
 }
 
 @MainActor
@@ -86,6 +97,7 @@ final class GarageStore: ObservableObject {
                saved.belongs(to: connection) {
                 cache = saved
                 offline = true
+                invalidateOutdatedSignalCache()
             }
         } catch { self.error = error.localizedDescription }
         #if DEBUG
@@ -104,6 +116,13 @@ final class GarageStore: ObservableObject {
         self.connection = connection
         self.cache = cache
         self.offline = offline
+        invalidateOutdatedSignalCache()
+    }
+
+    private func invalidateOutdatedSignalCache() {
+        if cache.invalidateOutdatedSignalCache() {
+            persist(errorMessage: "Old saved readings are hidden, but this phone couldn't save the cache update. Connect to refresh your readings.")
+        }
     }
 
     var vehicles: [Vehicle] { cache.vehicles }

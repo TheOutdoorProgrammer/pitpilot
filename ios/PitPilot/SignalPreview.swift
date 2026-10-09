@@ -36,7 +36,7 @@ struct SignalPreview: View {
                     SignalMiniChart(data: data, unit: history.displayedUnit(statistic), estimated: reading?.quality == "estimated")
                         .accessibilityLabel("\(latest.label(metric)) history preview")
                         .accessibilityIdentifier("preview-\(metric)")
-                    Text("\(days == 365 ? "1 year" : "\(days) days") · \(statistic == "trend" ? "observed readings" : SignalFormat.statistic(statistic).lowercased()) · all sources")
+                    Text("\(days == 365 ? "1 year" : "\(days) days") · all sources")
                         .font(.caption2).foregroundStyle(.secondary)
                 } else { placeholder("No history in this range") }
             } else { placeholder(loading ? "Loading trend…" : failed ? "History unavailable" : "No history yet") }
@@ -89,15 +89,13 @@ struct SignalMiniChart: View {
                             .foregroundStyle(tint.opacity(0.5)).lineStyle(StrokeStyle(lineWidth: 1, dash: [2, 3]))
                     }
                     ForEach(data.vertices) { vertex in
-                        if !vertex.summary {
-                            AreaMark(x: .value("Time", vertex.x), yStart: .value("Baseline", data.yDomain(unit: unit).lowerBound), yEnd: .value("Value", vertex.value), series: .value("Segment", vertex.segment))
-                                .foregroundStyle(LinearGradient(colors: [(vertex.estimated ? Color.cyan : PitStyle.amber).opacity(0.3), tint.opacity(0.02)], startPoint: .top, endPoint: .bottom))
-                            LineMark(x: .value("Time", vertex.x), y: .value("Value", vertex.value), series: .value("Segment", vertex.segment))
-                                .foregroundStyle(vertex.estimated ? .cyan : PitStyle.amber).lineStyle(StrokeStyle(lineWidth: 2, lineCap: .round))
-                        }
+                        AreaMark(x: .value("Time", vertex.x), yStart: .value("Baseline", data.yDomain(unit: unit).lowerBound), yEnd: .value("Value", vertex.value), series: .value("Segment", vertex.segment))
+                            .foregroundStyle(LinearGradient(colors: [(vertex.estimated ? Color.cyan : PitStyle.amber).opacity(0.3), tint.opacity(0.02)], startPoint: .top, endPoint: .bottom))
+                        LineMark(x: .value("Time", vertex.x), y: .value("Value", vertex.value), series: .value("Segment", vertex.segment))
+                            .foregroundStyle(vertex.estimated ? .cyan : PitStyle.amber).lineStyle(StrokeStyle(lineWidth: 2, lineCap: .round))
                         PointMark(x: .value("Time", vertex.x), y: .value("Value", vertex.value))
-                            .foregroundStyle(vertex.summary ? .teal : vertex.estimated ? .cyan : PitStyle.amber).symbolSize(data.vertices.count == 1 ? 24 : 4)
-                            .symbol(vertex.summary ? BasicChartSymbolShape.diamond : vertex.calendarDay ? BasicChartSymbolShape.square : BasicChartSymbolShape.circle)
+                            .foregroundStyle(vertex.estimated ? .cyan : PitStyle.amber).symbolSize(data.vertices.count == 1 ? 24 : 4)
+                            .symbol(vertex.calendarDay ? BasicChartSymbolShape.square : BasicChartSymbolShape.circle)
                     }
                     if data.kind == .bars {
                         ForEach(data.buckets) { bucket in
