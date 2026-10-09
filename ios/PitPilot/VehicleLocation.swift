@@ -38,11 +38,19 @@ struct VehicleLocationView: View {
                 if store.locationsRefreshing.contains(vehicleID) { ProgressView().accessibilityLabel("Refreshing location") }
             }
             if let fix, CLLocationCoordinate2DIsValid(fix.coordinate) {
-                Button { fullMap = true } label: {
+                ZStack {
                     Map(initialPosition: .region(MKCoordinateRegion(center: fix.coordinate, latitudinalMeters: 1600, longitudinalMeters: 1600)), interactionModes: []) {
                         Marker("Last known location", coordinate: fix.coordinate).tint(PitStyle.amber)
-                    }.id(fix.recordedAt).frame(height: 190).clipShape(RoundedRectangle(cornerRadius: 16)).allowsHitTesting(false)
-                }.buttonStyle(.plain).accessibilityLabel("Open last known vehicle location").accessibilityIdentifier("vehicleLocationMap")
+                    }.id(fix.recordedAt).allowsHitTesting(false).accessibilityHidden(true)
+                    // The disabled Map cannot supply the button's interactive surface.
+                    Button { fullMap = true } label: {
+                        ZStack(alignment: .topTrailing) {
+                            Rectangle().fill(.clear).contentShape(Rectangle())
+                            Image(systemName: "arrow.up.left.and.arrow.down.right")
+                                .padding(10).background(.ultraThinMaterial, in: Circle()).padding(10)
+                        }
+                    }.buttonStyle(.plain).accessibilityLabel("Open last known vehicle location").accessibilityIdentifier("vehicleLocationMap")
+                }.frame(height: 190).clipShape(RoundedRectangle(cornerRadius: 16))
                 TimelineView(.periodic(from: .now, by: 60)) { context in
                     HStack(alignment: .top) {
                         Text(SignalFormat.date(fix.recordedAt)?.formatted(date: .abbreviated, time: .shortened) ?? "Unknown capture time")
