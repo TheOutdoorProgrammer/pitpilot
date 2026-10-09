@@ -84,6 +84,9 @@ Deployed acceptance passed odometer calibration and replay checks, authenticated
 
 ### Native vehicle measurements
 
+- [x] Show or hide individual dashboard metrics per vehicle on this phone, without changing collection or stored history.
+- [x] Combine compatible imported and native readings in one chart while retaining source, quality, statistic and time precision.
+- [x] Keep sparse numeric history readable with dotted gap guides and preserve previously cached history during offline upgrades.
 - [x] Store canonical readings from Pi and Smartcar sources with idempotent ingestion, source time, units and quality.
 - [x] Preserve date-only snapshots and daily aggregates separately from timestamped samples.
 - [x] Show available values on the native vehicle dashboard with provenance and stale-state labels.
@@ -94,7 +97,11 @@ Deployed acceptance passed odometer calibration and replay checks, authenticated
 
 Native measurements were introduced in [v0.3.0](https://github.com/TheOutdoorProgrammer/pitpilot/releases/tag/v0.3.0). Chart improvements shipped in [v0.3.1](https://github.com/TheOutdoorProgrammer/pitpilot/releases/tag/v0.3.1). Its [release workflow](https://github.com/TheOutdoorProgrammer/pitpilot/actions/runs/37849807248) passed backend checks, 29 native unit tests, seven UI journeys, and 16 runner cleanup fixtures. Native builds and signing ran on the self-hosted runner.
 
-Fresh screenshots verified dense fuel trends, visible count bars, boolean and code lanes, readable date labels, range details, offline history, and landscape capture. Physical-device validation of the updated charts remains pending. A single-day aggregate can repeat its date across several ticks; its full period times remain available in the details.
+Fresh screenshots verified dense fuel trends, visible count bars, boolean and code lanes, readable date labels, range details, offline history, and landscape capture. Physical-device validation of the updated charts remains pending. Single-day timestamped aggregates now use intraday tick labels; their full reporting periods remain available in the details.
+
+[v0.5.1](https://github.com/TheOutdoorProgrammer/pitpilot/releases/tag/v0.5.1) adds dashboard metric controls, removes the import badge from vehicle cards, and combines compatible reading history. Its [release workflow](https://github.com/TheOutdoorProgrammer/pitpilot/actions/runs/37911967530) passed 59 native unit tests and 12 UI journeys on the self-hosted runner. Reviewed screenshots cover combined dense fuel history, metric visibility, offline restoration, state lanes, count bars and single-day aggregate labels. The signed [Fledge app is 0.5.1, build 24](https://fledge.theoutdoorprogrammer.com/a/com.theoutdoorprogrammer.pitpilot/a4574bf26336). The backend's explicit all-statistics query preserves the individual query results and existing default behavior without rewriting stored measurements.
+
+Deployed v0.5.1 acceptance passed 192 checks across all 48 household vehicle metrics, including 31 with multiple sources. Unified responses matched the individual-statistic results while retaining defaults, units, values and time precision. Online backups before and after the rollout were byte-identical, with all 18 tables preserved. Publication verified signed collector manifests, both container platforms and the same-run Fledge IPA.
 
 Deployed acceptance verified ingestion, retry and conflict behavior, preserved history ranges, valid zero readings, independent scraper authorization, and correlated operational telemetry. Generated-note conversion passed source reconciliation and preservation checks; repeat conversion had no work, and a restored backup skipped unchanged source imports without recreating notes. Built-in adapters and their separate live acceptance requirements are tracked below.
 
