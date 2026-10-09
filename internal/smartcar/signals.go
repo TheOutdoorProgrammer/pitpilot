@@ -48,7 +48,7 @@ type adapted struct {
 	Reconnect                bool
 }
 
-func adapt(vehicle string, signals []remoteSignal, now time.Time) adapted {
+func adapt(vehicle string, signals []remoteSignal, now time.Time, authorizedAt *time.Time) adapted {
 	r := adapted{Batch: garage.SignalBatch{Source: "smartcar", Observations: []garage.SignalObservation{}}, Metrics: []string{}}
 	metrics := map[string]bool{}
 	seen := map[string]bool{}
@@ -62,7 +62,11 @@ func adapt(vehicle string, signals []remoteSignal, now time.Time) adapted {
 		if signal.Attributes.Status.Value != "SUCCESS" {
 			r.Unavailable++
 			if e := signal.Attributes.Status.Error; e != nil && (e.Code == "AUTHENTICATION_FAILED" || e.Code == "PERMISSION_DENIED") {
-				r.Reconnect = true
+				at, err := time.Parse(time.RFC3339Nano, signal.Meta.IngestedAt)
+				// Cached errors from before consent cannot establish that the new authorization failed.
+				if authorizedAt == nil || err != nil || at.Year() < 2000 || !at.Before(*authorizedAt) {
+					r.Reconnect = true
+				}
 			}
 			continue
 		}

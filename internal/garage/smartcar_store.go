@@ -10,6 +10,8 @@ import (
 
 var ErrSmartcarConflict = errors.New("smartcar integration state changed")
 
+const MinimumSmartcarPollInterval = time.Hour
+
 func smartcarOperation(ctx context.Context, name string) (context.Context, func(error)) {
 	ctx, done := operation(ctx, "db."+name)
 	return ctx, func(err error) {
@@ -29,16 +31,17 @@ type SmartcarSession struct {
 }
 
 type SmartcarStatus struct {
-	State              string     `json:"state"`
-	ConnectionID       string     `json:"connectionId,omitempty"`
-	LastAttemptAt      *time.Time `json:"lastAttemptAt,omitempty"`
-	LastSuccessAt      *time.Time `json:"lastSuccessAt,omitempty"`
-	LatestObservedAt   *time.Time `json:"latestObservedAt,omitempty"`
-	NextAttemptAt      *time.Time `json:"nextAttemptAt,omitempty"`
-	ErrorCode          string     `json:"errorCode,omitempty"`
-	SupportedMetrics   []string   `json:"supportedMetrics"`
-	UnavailableSignals int        `json:"unavailableSignals"`
-	UnsupportedSignals int        `json:"unsupportedSignals"`
+	State                  string     `json:"state"`
+	AuthorizationStartedAt *time.Time `json:"authorizationStartedAt,omitempty"`
+	ConnectionID           string     `json:"connectionId,omitempty"`
+	LastAttemptAt          *time.Time `json:"lastAttemptAt,omitempty"`
+	LastSuccessAt          *time.Time `json:"lastSuccessAt,omitempty"`
+	LatestObservedAt       *time.Time `json:"latestObservedAt,omitempty"`
+	NextAttemptAt          *time.Time `json:"nextAttemptAt,omitempty"`
+	ErrorCode              string     `json:"errorCode,omitempty"`
+	SupportedMetrics       []string   `json:"supportedMetrics"`
+	UnavailableSignals     int        `json:"unavailableSignals"`
+	UnsupportedSignals     int        `json:"unsupportedSignals"`
 }
 
 type SmartcarConnection struct {
@@ -161,13 +164,24 @@ func (s *Store) BindSmartcar(ctx context.Context, session SmartcarSession, expec
 	if version != session.Version || expiry <= time.Now().Unix() {
 		return ErrSmartcarConflict
 	}
-	var currentID string
-	err = tx.QueryRowContext(ctx, `SELECT id FROM smartcar_connections WHERE vehicle_id=?`, v.VehicleID).Scan(&currentID)
+	previous, readErr := scanSmartcar(tx.QueryRowContext(ctx, `SELECT `+smartcarColumns+` FROM smartcar_connections WHERE vehicle_id=?`, v.VehicleID))
+	err = readErr
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return
 	}
-	if currentID != expectedID {
+	if previous.ID != expectedID {
 		return ErrSmartcarConflict
+	}
+	if previous.ID != "" {
+		v.Status.LastAttemptAt = previous.Status.LastAttemptAt
+		v.RetryAt = previous.RetryAt
+		if previous.NextAttemptAt.After(v.NextAttemptAt) {
+			v.NextAttemptAt = previous.NextAttemptAt
+		}
+		if v.RetryAt.After(v.NextAttemptAt) {
+			v.NextAttemptAt = v.RetryAt
+		}
+		v.Status.NextAttemptAt = &v.NextAttemptAt
 	}
 	var owner string
 	err = tx.QueryRowContext(ctx, `SELECT vehicle_id FROM smartcar_connections WHERE remote_key=?`, v.RemoteKey).Scan(&owner)
@@ -181,7 +195,7 @@ func (s *Store) BindSmartcar(ctx context.Context, session SmartcarSession, expec
 	if err != nil {
 		return
 	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO smartcar_connections(id,vehicle_id,remote_key,encrypted,status,next_attempt) VALUES(?,?,?,?,?,?) ON CONFLICT(vehicle_id) DO UPDATE SET id=excluded.id,remote_key=excluded.remote_key,encrypted=excluded.encrypted,status=excluded.status,next_attempt=excluded.next_attempt,retry_at=0,lease_until=0,lease_token='',failures=0`, v.ID, v.VehicleID, v.RemoteKey, v.Encrypted, string(raw), v.NextAttemptAt.Unix())
+	_, err = tx.ExecContext(ctx, `INSERT INTO smartcar_connections(id,vehicle_id,remote_key,encrypted,status,next_attempt,retry_at) VALUES(?,?,?,?,?,?,?) ON CONFLICT(vehicle_id) DO UPDATE SET id=excluded.id,remote_key=excluded.remote_key,encrypted=excluded.encrypted,status=excluded.status,next_attempt=excluded.next_attempt,retry_at=excluded.retry_at,lease_until=0,lease_token='',failures=0`, v.ID, v.VehicleID, v.RemoteKey, v.Encrypted, string(raw), v.NextAttemptAt.Unix(), max(int64(0), v.RetryAt.Unix()))
 	if err != nil {
 		return
 	}
@@ -208,9 +222,10 @@ func (s *Store) DetachSmartcar(ctx context.Context, vehicleID string) (err error
 	return tx.Commit()
 }
 
-func (s *Store) ClaimSmartcar(ctx context.Context, now time.Time) (v SmartcarConnection, err error) {
+func (s *Store) ClaimSmartcar(ctx context.Context, now time.Time, interval time.Duration) (v SmartcarConnection, err error) {
 	ctx, done := smartcarOperation(ctx, "smartcar.sync.claim")
 	defer func() { done(err) }()
+	interval = max(interval, MinimumSmartcarPollInterval)
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return
@@ -225,12 +240,21 @@ func (s *Store) ClaimSmartcar(ctx context.Context, now time.Time) (v SmartcarCon
 		err = sql.ErrNoRows
 		return
 	}
-	v, err = scanSmartcar(tx.QueryRowContext(ctx, `SELECT `+smartcarColumns+` FROM smartcar_connections WHERE next_attempt<=? AND retry_at<=? AND lease_until<=? AND json_extract(status,'$.state')!='reconnect_required' ORDER BY next_attempt LIMIT 1`, now.Unix(), now.Unix(), now.Unix()))
+	v, err = scanSmartcar(tx.QueryRowContext(ctx, `SELECT `+smartcarColumns+` FROM smartcar_connections WHERE next_attempt<=? AND retry_at<=? AND lease_until<=? AND coalesce(unixepoch(json_extract(status,'$.lastAttemptAt')),0)<=? ORDER BY next_attempt LIMIT 1`, now.Unix(), now.Unix(), now.Unix(), now.Add(-interval).Unix()))
 	if err != nil {
 		return
 	}
 	v.LeaseToken = NewID()
-	_, err = tx.ExecContext(ctx, `UPDATE smartcar_connections SET lease_until=?,lease_token=? WHERE id=?`, now.Add(2*time.Minute).Unix(), v.LeaseToken, v.ID)
+	// Persist the configured cooldown before contacting Smartcar so crashes cannot bypass it.
+	now = now.UTC()
+	v.Status.LastAttemptAt = &now
+	v.NextAttemptAt = now.Add(interval)
+	v.Status.NextAttemptAt = &v.NextAttemptAt
+	raw, err := json.Marshal(v.Status)
+	if err != nil {
+		return v, err
+	}
+	_, err = tx.ExecContext(ctx, `UPDATE smartcar_connections SET lease_until=?,lease_token=?,status=?,next_attempt=? WHERE id=?`, now.Add(2*time.Minute).Unix(), v.LeaseToken, string(raw), v.NextAttemptAt.Unix(), v.ID)
 	if err != nil {
 		return
 	}
@@ -278,7 +302,7 @@ func (s *Store) RequestSmartcarSync(ctx context.Context, vehicleID string, now t
 	ctx, done := smartcarOperation(ctx, "smartcar.sync.request")
 	defer func() { done(err) }()
 	// Human refresh cannot bypass OEM backoff or hammer a vehicle repeatedly.
-	r, err := s.db.ExecContext(ctx, `UPDATE smartcar_connections SET next_attempt=max(?,retry_at,coalesce(unixepoch(json_extract(status,'$.lastAttemptAt')),0)+60) WHERE vehicle_id=? AND json_extract(status,'$.state')!='reconnect_required'`, now.Unix(), vehicleID)
+	r, err := s.db.ExecContext(ctx, `UPDATE smartcar_connections SET next_attempt=max(next_attempt,?,retry_at,coalesce(unixepoch(json_extract(status,'$.lastAttemptAt')),0)+?) WHERE vehicle_id=?`, now.Unix(), int64(MinimumSmartcarPollInterval.Seconds()), vehicleID)
 	if err != nil {
 		return
 	}

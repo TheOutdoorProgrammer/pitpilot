@@ -260,6 +260,7 @@ type remoteSignal struct {
 	} `json:"attributes"`
 	Meta struct {
 		OEMUpdatedAt string `json:"oemUpdatedAt"`
+		IngestedAt   string `json:"ingestedAt"`
 		RetrievedAt  string `json:"retrievedAt"`
 	} `json:"meta"`
 }

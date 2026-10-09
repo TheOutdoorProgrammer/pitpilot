@@ -27,6 +27,8 @@ var (
 	ErrReconnect = errors.New("smartcar reconnection is required")
 )
 
+const authorizationSessionLifetime = 15 * time.Minute
+
 type Config struct {
 	ApplicationID, ClientID, ClientSecret, Mode, RedirectURI string
 	EncryptionKey                                            []byte
@@ -62,8 +64,8 @@ func New(store *garage.Store, cfg Config, logger *slog.Logger) (*Service, error)
 	if cfg.PollInterval == 0 {
 		cfg.PollInterval = time.Hour
 	}
-	if cfg.PollInterval < 5*time.Minute || cfg.PollInterval > 24*time.Hour {
-		return nil, errors.New("smartcar poll interval must be between five minutes and one day")
+	if cfg.PollInterval < garage.MinimumSmartcarPollInterval || cfg.PollInterval > 24*time.Hour {
+		return nil, errors.New("smartcar poll interval must be between one hour and one day")
 	}
 	expected := "sc" + cfg.ApplicationID + "://callback"
 	if cfg.RedirectURI == "" {
@@ -115,11 +117,7 @@ func (s *Service) Status(ctx context.Context, vehicleID string) (garage.Smartcar
 	if err != nil {
 		return garage.SmartcarStatus{}, err
 	}
-	if v.Status.State == "reconnect_required" {
-		v.Status.NextAttemptAt = nil
-	} else {
-		v.Status.NextAttemptAt = &v.NextAttemptAt
-	}
+	v.Status.NextAttemptAt = &v.NextAttemptAt
 	return v.Status, nil
 }
 
@@ -245,7 +243,7 @@ func (s *Service) Begin(ctx context.Context, vehicleID, intent string) (SessionR
 	return result, nil
 }
 func (s *Service) saveNewSession(ctx context.Context, vehicleID string, data sessionData) (SessionResult, error) {
-	v := garage.SmartcarSession{ID: garage.NewID(), VehicleID: vehicleID, ExpiresAt: time.Now().UTC().Add(15 * time.Minute)}
+	v := garage.SmartcarSession{ID: garage.NewID(), VehicleID: vehicleID, ExpiresAt: time.Now().UTC().Add(authorizationSessionLifetime)}
 	var err error
 	v.Encrypted, err = s.seal("session", v.ID, data)
 	if err != nil {
@@ -407,6 +405,10 @@ func (s *Service) Bind(ctx context.Context, vehicleID, id, candidateID string) (
 	}
 	connection := garage.SmartcarConnection{ID: garage.NewID(), VehicleID: vehicleID, RemoteKey: s.remoteKey(selected.Identity.VehicleID), NextAttemptAt: time.Now().UTC()}
 	connection.Status = garage.SmartcarStatus{State: "provisioning", ConnectionID: connection.ID, SupportedMetrics: []string{}, NextAttemptAt: &connection.NextAttemptAt}
+	if data.Intent != "adopt" {
+		started := v.ExpiresAt.Add(-authorizationSessionLifetime)
+		connection.Status.AuthorizationStartedAt = &started
+	}
 	connection.Encrypted, err = s.seal("connection", connection.ID, selected.Identity)
 	if err != nil {
 		return garage.SmartcarStatus{}, err
@@ -415,7 +417,7 @@ func (s *Service) Bind(ctx context.Context, vehicleID, id, candidateID string) (
 		return garage.SmartcarStatus{}, err
 	}
 	s.notify()
-	return connection.Status, nil
+	return s.Status(ctx, vehicleID)
 }
 func (s *Service) Detach(ctx context.Context, vehicleID string) error {
 	if _, err := s.store.Vehicle(ctx, vehicleID); err != nil {
@@ -424,12 +426,9 @@ func (s *Service) Detach(ctx context.Context, vehicleID string) error {
 	return s.store.DetachSmartcar(ctx, vehicleID)
 }
 func (s *Service) Sync(ctx context.Context, vehicleID string) (garage.SmartcarStatus, error) {
-	status, err := s.Status(ctx, vehicleID)
+	_, err := s.Status(ctx, vehicleID)
 	if err != nil {
 		return garage.SmartcarStatus{}, err
-	}
-	if status.State == "reconnect_required" {
-		return status, ErrReconnect
 	}
 	if err := s.store.RequestSmartcarSync(ctx, vehicleID, time.Now()); err != nil {
 		return garage.SmartcarStatus{}, err

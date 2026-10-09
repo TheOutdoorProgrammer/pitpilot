@@ -42,7 +42,7 @@ func TestSmartcarConcurrentLeaseAndAtomicSignalFailure(t *testing.T) {
 	var claimed SmartcarConnection
 	for i := 0; i < 8; i++ {
 		wg.Go(func() {
-			v, err := s.ClaimSmartcar(ctx, time.Now())
+			v, err := s.ClaimSmartcar(ctx, time.Now(), time.Hour)
 			if err == nil {
 				if winners.Add(1) == 1 {
 					claimed = v
@@ -98,5 +98,42 @@ func TestSmartcarSessionCASAndExpiry(t *testing.T) {
 	v.Version = 1
 	if err := s.UpdateSmartcarSession(ctx, v); !errors.Is(err, ErrSmartcarConflict) {
 		t.Fatal("expired session update accepted")
+	}
+}
+
+func TestSmartcarCrashAndRebindCannotBypassHourlyDeadline(t *testing.T) {
+	s, c := smartcarStoreFixture(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	claimed, err := s.ClaimSmartcar(ctx, now, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = s.RequestSmartcarSync(ctx, c.VehicleID, now.Add(3*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.ClaimSmartcar(ctx, now.Add(3*time.Minute), time.Hour); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatal("expired lease allowed another request before an hour", err)
+	}
+	claimed.Status.State = "reconnect_required"
+	claimed.RetryAt = now.Add(3 * time.Hour)
+	claimed.NextAttemptAt = claimed.RetryAt
+	if err = s.FinishSmartcar(ctx, claimed, nil, time.Time{}); err != nil {
+		t.Fatal(err)
+	}
+	session := SmartcarSession{ID: NewID(), VehicleID: c.VehicleID, ExpiresAt: now.Add(time.Hour), Encrypted: []byte("fixture")}
+	if err = s.CreateSmartcarSession(ctx, session); err != nil {
+		t.Fatal(err)
+	}
+	c.ID = NewID()
+	c.NextAttemptAt = now
+	if err = s.BindSmartcar(ctx, session, claimed.ID, c); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.ClaimSmartcar(ctx, now.Add(2*time.Hour), time.Hour); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatal("reauthorization erased provider backoff", err)
+	}
+	if _, err = s.ClaimSmartcar(ctx, now.Add(3*time.Hour+time.Second), time.Hour); err != nil {
+		t.Fatal("rebound connection could not recover", err)
 	}
 }

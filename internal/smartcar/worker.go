@@ -17,7 +17,7 @@ func (s *Service) Run(ctx context.Context) {
 	defer ticker.Stop()
 	for {
 		for ctx.Err() == nil {
-			v, err := s.store.ClaimSmartcar(ctx, time.Now())
+			v, err := s.store.ClaimSmartcar(ctx, time.Now(), s.interval)
 			if errors.Is(err, sql.ErrNoRows) {
 				break
 			}
@@ -50,7 +50,7 @@ func (s *Service) process(parent context.Context, v garage.SmartcarConnection) {
 		var signals []remoteSignal
 		signals, err = s.client.signals(ctx, i.VehicleID, i.UserID)
 		if err == nil {
-			result = adapt(i.VehicleID, signals, now)
+			result = adapt(i.VehicleID, signals, now, v.Status.AuthorizationStartedAt)
 		}
 	}
 	var batch *garage.SignalBatch
@@ -70,7 +70,7 @@ func (s *Service) process(parent context.Context, v garage.SmartcarConnection) {
 		if code == "reconnect_required" {
 			v.Status.State = "reconnect_required"
 		}
-		delay := time.Minute * time.Duration(1<<min(v.Failures, 6))
+		delay := max(s.interval, time.Minute*time.Duration(1<<min(v.Failures, 6)))
 		v.RetryAt = now.Add(delay)
 		if p != nil && !p.RetryAt.IsZero() && p.RetryAt.After(v.RetryAt) {
 			v.RetryAt = p.RetryAt
@@ -84,7 +84,11 @@ func (s *Service) process(parent context.Context, v garage.SmartcarConnection) {
 		v.Failures = 0
 		v.Status.State = "connected"
 		v.Status.ErrorCode = ""
-		v.Status.LastSuccessAt = &now
+		if result.Latest != nil {
+			v.Status.LastSuccessAt = &now
+		} else if previousObservation == nil {
+			v.Status.LastSuccessAt = nil
+		}
 		v.Status.SupportedMetrics = result.Metrics
 		v.Status.UnavailableSignals = result.Unavailable
 		v.Status.UnsupportedSignals = result.Unsupported
@@ -94,6 +98,7 @@ func (s *Service) process(parent context.Context, v garage.SmartcarConnection) {
 		if result.Reconnect {
 			v.Status.State = "reconnect_required"
 			v.Status.ErrorCode = "reconnect_required"
+			span.SetStatus(codes.Error, "provider account requires attention")
 		} else if result.Latest == nil {
 			v.Status.State = "provisioning"
 			if previousObservation != nil {

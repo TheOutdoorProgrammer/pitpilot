@@ -119,7 +119,7 @@ func TestConnectStateSelectionReplayAndEncryptedStorage(t *testing.T) {
 		t.Fatal("arbitrary candidate accepted")
 	}
 	status, err := s.Bind(ctx, vehicle, begin.SessionID, complete.Candidates[0].CandidateID)
-	if err != nil || status.State != "provisioning" {
+	if err != nil || status.State != "provisioning" || status.AuthorizationStartedAt == nil {
 		t.Fatalf("bind %v", err)
 	}
 	if _, err = s.Bind(ctx, vehicle, begin.SessionID, complete.Candidates[0].CandidateID); !errors.Is(err, ErrSession) {
@@ -221,7 +221,7 @@ func TestWorkerIdempotencyOutOfOrderAndDetachLease(t *testing.T) {
 	adoptFixture(t, s, vehicle)
 	run := func() {
 		t.Helper()
-		claimed, err := store.ClaimSmartcar(ctx, time.Now().Add(2*time.Hour))
+		claimed, err := store.ClaimSmartcar(ctx, time.Now().Add(2*time.Hour), s.interval)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -245,7 +245,7 @@ func TestWorkerIdempotencyOutOfOrderAndDetachLease(t *testing.T) {
 	if err != nil || len(export.Signals) != 2 {
 		t.Fatal("older history was lost")
 	}
-	claimed, err := store.ClaimSmartcar(ctx, time.Now().Add(2*time.Hour))
+	claimed, err := store.ClaimSmartcar(ctx, time.Now().Add(2*time.Hour), s.interval)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -269,7 +269,7 @@ func TestWorkerRetryDeadlineSurvivesRestartAndManualSync(t *testing.T) {
 		_, _ = w.Write([]byte(`{"errors":[{"code":"VEHICLE"}]}`))
 	})
 	adoptFixture(t, s, vehicle)
-	claimed, err := store.ClaimSmartcar(ctx, time.Now())
+	claimed, err := store.ClaimSmartcar(ctx, time.Now(), s.interval)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -286,11 +286,57 @@ func TestWorkerRetryDeadlineSurvivesRestartAndManualSync(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer restored.Close()
-	if _, err = restored.ClaimSmartcar(ctx, time.Now().Add(30*time.Minute)); !errors.Is(err, sql.ErrNoRows) {
+	if _, err = restored.ClaimSmartcar(ctx, time.Now().Add(30*time.Minute), s.interval); !errors.Is(err, sql.ErrNoRows) {
 		t.Fatal("restart lost persistent deadline", err)
 	}
-	if _, err = restored.ClaimSmartcar(ctx, time.Now().Add(2*time.Hour)); err != nil {
+	if _, err = restored.ClaimSmartcar(ctx, time.Now().Add(2*time.Hour), s.interval); err != nil {
 		t.Fatal("deadline never expires", err)
+	}
+}
+
+func TestClaimCooldownSurvivesCrashAndRestart(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		interval time.Duration
+		cooldown time.Duration
+	}{
+		{"configured six hours", 6 * time.Hour, 6 * time.Hour},
+		{"minimum hour enforced", time.Minute, time.Hour},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, store, vehicle, path := serviceFixture(t)
+			ctx := context.Background()
+			providerFixture(t, s, nil, nil)
+			adoptFixture(t, s, vehicle)
+			now := time.Now().UTC().Truncate(time.Second).Add(time.Second)
+			if _, err := store.ClaimSmartcar(ctx, now, tc.interval); err != nil {
+				t.Fatal(err)
+			}
+			// No finish: simulate losing the worker after its durable claim.
+			if err := store.Close(); err != nil {
+				t.Fatal(err)
+			}
+			restored, err := garage.Open(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer restored.Close()
+			connection, err := restored.SmartcarConnection(ctx, vehicle)
+			if err != nil || !connection.NextAttemptAt.Equal(now.Add(tc.cooldown)) {
+				t.Fatalf("configured cooldown was not persisted: %v %v", connection.NextAttemptAt, err)
+			}
+			before := now.Add(tc.cooldown - time.Minute)
+			if err := restored.RequestSmartcarSync(ctx, vehicle, before); err != nil {
+				t.Fatal(err)
+			}
+			// Even a shorter interval after restart must preserve the existing deadline.
+			if _, err := restored.ClaimSmartcar(ctx, before, time.Hour); !errors.Is(err, sql.ErrNoRows) {
+				t.Fatal("restart or manual sync bypassed persisted cooldown", err)
+			}
+			if _, err := restored.ClaimSmartcar(ctx, now.Add(tc.cooldown+time.Second), time.Hour); err != nil {
+				t.Fatal("expired cooldown did not permit recovery", err)
+			}
+		})
 	}
 }
 
@@ -300,7 +346,7 @@ func TestWorkerMissingTimestampIsUnavailableNotNow(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"data": []remoteSignal{fixtureSignal("odometer-traveleddistance", `{"value":1000,"unit":"km"}`, "")}, "meta": map[string]int{"totalCount": 1}})
 	})
 	adoptFixture(t, s, vehicle)
-	claimed, err := store.ClaimSmartcar(context.Background(), time.Now())
+	claimed, err := store.ClaimSmartcar(context.Background(), time.Now(), s.interval)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -325,7 +371,7 @@ func TestWorkerObservationConflictPreservesPreviousSuccess(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"data": []remoteSignal{fixtureSignal("internalcombustionengine-fuellevel", string(body), at)}, "meta": map[string]int{"totalCount": 1}})
 	})
 	adoptFixture(t, s, vehicle)
-	claimed, err := store.ClaimSmartcar(ctx, time.Now())
+	claimed, err := store.ClaimSmartcar(ctx, time.Now(), s.interval)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -335,7 +381,7 @@ func TestWorkerObservationConflictPreservesPreviousSuccess(t *testing.T) {
 		t.Fatal(err)
 	}
 	value = 11
-	claimed, err = store.ClaimSmartcar(ctx, time.Now().Add(2*time.Hour))
+	claimed, err = store.ClaimSmartcar(ctx, time.Now().Add(2*time.Hour), s.interval)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -359,7 +405,7 @@ func TestAppRateLimitDefersOtherConnections(t *testing.T) {
 		_, _ = w.Write([]byte(`{"errors":[{"code":"SMARTCAR_API"}]}`))
 	})
 	adoptFixture(t, s, vehicle)
-	claimed, err := store.ClaimSmartcar(ctx, time.Now())
+	claimed, err := store.ClaimSmartcar(ctx, time.Now(), s.interval)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -376,7 +422,7 @@ func TestAppRateLimitDefersOtherConnections(t *testing.T) {
 	if err = store.BindSmartcar(ctx, session, "", connection); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = store.ClaimSmartcar(ctx, time.Now().Add(30*time.Minute)); !errors.Is(err, sql.ErrNoRows) {
+	if _, err = store.ClaimSmartcar(ctx, time.Now().Add(30*time.Minute), s.interval); !errors.Is(err, sql.ErrNoRows) {
 		t.Fatal("application backoff did not protect other connection", err)
 	}
 }

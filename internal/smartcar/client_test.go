@@ -116,7 +116,7 @@ func TestSignalAdapterPresenceUnitsTimestampAndStableIdentity(t *testing.T) {
 	stamp := now.Add(-time.Hour).Format(time.RFC3339Nano)
 	good := fixtureSignal("internalcombustionengine-fuellevel", `{"value":0,"unit":"percent"}`, stamp)
 	input := []remoteSignal{good, fixtureSignal("internalcombustionengine-range", `{"value":200,"unit":"km"}`, stamp), fixtureSignal("location-preciselocation", `{"latitude":0,"longitude":0,"locationType":"LAST_PARKED"}`, stamp)}
-	r := adapt("vehicle-fixture", input, now)
+	r := adapt("vehicle-fixture", input, now, nil)
 	if len(r.Batch.Observations) != 2 || len(r.Batch.Contexts) != 1 || r.Unavailable != 0 || r.Batch.Validate() != nil {
 		t.Fatalf("valid signals %+v", r)
 	}
@@ -126,12 +126,12 @@ func TestSignalAdapterPresenceUnitsTimestampAndStableIdentity(t *testing.T) {
 		}
 	}
 	input[0].Meta.RetrievedAt = now.Format(time.RFC3339Nano)
-	again := adapt("vehicle-fixture", input, now.Add(time.Minute))
+	again := adapt("vehicle-fixture", input, now.Add(time.Minute), nil)
 	if again.Batch.BatchID != r.Batch.BatchID {
 		t.Fatal("retrieval time changed immutable observation")
 	}
 	for _, tc := range []struct{ code, body, at string }{{"internalcombustionengine-fuellevel", `{"unit":"percent"}`, stamp}, {"internalcombustionengine-fuellevel", `{"value":null,"unit":"percent"}`, stamp}, {"internalcombustionengine-fuellevel", `{"value":0,"value":50,"unit":"percent"}`, stamp}, {"internalcombustionengine-fuellevel", `{"value":0,"unit":"fraction"}`, stamp}, {"internalcombustionengine-fuellevel", `{"value":101,"unit":"percent"}`, stamp}, {"internalcombustionengine-fuellevel", `{"value":10,"unit":"percent"}`, ""}, {"location-preciselocation", `{"locationType":"LAST_PARKED"}`, stamp}, {"wheel-tires", `{"rowCount":2,"columnCount":2,"unit":"kPa","values":[{"tirePressure":220}]}`, stamp}} {
-		got := adapt("vehicle-fixture", []remoteSignal{fixtureSignal(tc.code, tc.body, tc.at)}, now)
+		got := adapt("vehicle-fixture", []remoteSignal{fixtureSignal(tc.code, tc.body, tc.at)}, now, nil)
 		if got.Unavailable != 1 || len(got.Batch.Observations) != 0 || len(got.Batch.Contexts) != 0 {
 			t.Fatalf("invalid fields manufactured observation for %s %s", tc.code, tc.body)
 		}
@@ -143,7 +143,7 @@ func TestSignalAdapterTirePositionsAndPartialErrors(t *testing.T) {
 	tire := fixtureSignal("wheel-tires", `{"rowCount":2,"columnCount":2,"unit":"kPa","values":[{"row":0,"column":0,"tirePressure":0},{"row":1,"column":1,"tirePressure":220}]}`, now.Format(time.RFC3339Nano))
 	bad := fixtureSignal("odometer-traveleddistance", `{}`, "")
 	bad.Attributes.Status.Value = "ERROR"
-	r := adapt("vehicle-fixture", []remoteSignal{tire, bad}, now)
+	r := adapt("vehicle-fixture", []remoteSignal{tire, bad}, now, nil)
 	if len(r.Batch.Observations) != 2 || r.Unavailable != 1 {
 		t.Fatalf("partial values %+v", r)
 	}
@@ -157,9 +157,36 @@ func TestProviderAuthenticationFailureDoesNotIngestCachedBody(t *testing.T) {
 	if err := json.Unmarshal([]byte(`{"id":"synthetic-signal","attributes":{"code":"internalcombustionengine-fuellevel","status":{"value":"ERROR","error":{"type":"CONNECTED_SERVICES_ACCOUNT","code":"AUTHENTICATION_FAILED"}},"body":{"value":25,"unit":"percent"}},"meta":{"ingestedAt":"2026-10-08T12:00:00Z"}}`), &signal); err != nil {
 		t.Fatal(err)
 	}
-	result := adapt("synthetic-vehicle", []remoteSignal{signal}, time.Now())
+	result := adapt("synthetic-vehicle", []remoteSignal{signal}, time.Now(), nil)
 	if !result.Reconnect || result.Unavailable != 1 || len(result.Batch.Observations) != 0 || result.Latest != nil {
 		t.Fatal("failed cached provider signal manufactured fresh measurement")
+	}
+}
+
+func TestAuthenticationErrorsRespectLatestAuthorization(t *testing.T) {
+	now := time.Now().UTC()
+	authorized := now.Add(-time.Minute)
+	for _, tc := range []struct {
+		name, ingested string
+		reconnect      bool
+	}{
+		{"cached before consent", now.Add(-7 * time.Hour).Format(time.RFC3339Nano), false},
+		{"after consent", now.Format(time.RFC3339Nano), true},
+		{"missing time", "", true},
+		{"invalid time", "invalid", true},
+		{"zero time", "0001-01-01T00:00:00Z", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var signal remoteSignal
+			if err := json.Unmarshal([]byte(`{"attributes":{"code":"internalcombustionengine-fuellevel","status":{"value":"ERROR","error":{"code":"AUTHENTICATION_FAILED"}},"body":{"value":25,"unit":"percent"}}}`), &signal); err != nil {
+				t.Fatal(err)
+			}
+			signal.Meta.IngestedAt = tc.ingested
+			result := adapt("fixture", []remoteSignal{signal}, now, &authorized)
+			if result.Reconnect != tc.reconnect || result.Unavailable != 1 || result.Latest != nil || len(result.Batch.Observations) != 0 {
+				t.Fatalf("unexpected adaptation %+v", result)
+			}
+		})
 	}
 }
 

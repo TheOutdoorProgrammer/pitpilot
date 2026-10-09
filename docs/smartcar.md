@@ -18,7 +18,7 @@ The backend reads credentials from mounted files:
 | `PITPILOT_SMARTCAR_CLIENT_SECRET_FILE` | File containing the API credential secret |
 | `PITPILOT_SMARTCAR_ENCRYPTION_KEY_FILE` | File containing a base64-encoded random 32-byte encryption key |
 | `PITPILOT_SMARTCAR_MODE` | `live` or `simulated`; defaults to `live` |
-| `PITPILOT_SMARTCAR_POLL_INTERVAL` | Go duration between successful reconciliations; defaults to `1h`, allowed `5m` through `24h` |
+| `PITPILOT_SMARTCAR_POLL_INTERVAL` | Minimum Go duration between reconciliations; defaults to `1h`, allowed `1h` through `24h` |
 
 Use your deployment's secret manager to mount these files. Do not put them in Git, the app bundle, URLs, logs, or ordinary garage exports. Access tokens are cached only in memory. Encrypted connection identities and temporary authorization sessions are stored in SQLite using AES-256-GCM with random nonces and row-specific associated data. The encryption key is external to the database.
 
@@ -29,6 +29,8 @@ Back up the stopped database, or use a consistent SQLite backup, together with t
 The native app starts an `ASWebAuthenticationSession` using the server-supplied authorization URL and application-specific callback scheme. OEM credentials stay on Smartcar's consent screens. The callback returns identifiers and state to the app, which posts them to the authenticated backend. The server validates state, expiry, application ownership, and the external identifier before presenting available vehicles. The user explicitly selects which remote vehicle belongs to the selected PitPilot vehicle. One remote vehicle cannot be paired with two PitPilot vehicles.
 
 Reconnect uses the [dedicated reauthentication flow](https://smartcar.com/docs/connect/re-auth/redirect-to-connect). Cancelling or failing reauthentication keeps the existing local connection. A successful reconnect must still pass provider verification before replacing it.
+
+After Connect or reauthentication, cached signal authentication errors timestamped before the new consent session began leave the connection awaiting provider data. Unknown or newer authentication failures still show a reconnect warning. Both cases continue checking on the hourly schedule so subscription renewal or provider recovery can restore collection without another consent loop. Existing connections created before authorization timestamps were recorded also resume hourly checks; their old errors cannot safely be classified as pre-authorization.
 
 Disconnect in PitPilot stops its jobs and removes its local binding and pending sessions. It preserves collected history and does not revoke the provider grant. This matters when another service shares the grant. Revoke access in the provider's account controls when you intend to stop every consumer of that grant.
 
@@ -53,7 +55,9 @@ Values use the provider's OEM update time, not the HTTP retrieval time. Missing 
 
 These mappings reuse protocol knowledge from the owner's existing collector while using separate validation, storage, and scheduling. Provider documentation: [engine signals](https://smartcar.com/docs/api-reference/signals/internalcombustionengine), [wheel signals](https://smartcar.com/docs/api-reference/signals/wheel), [location signals](https://smartcar.com/docs/api-reference/signals/location), and [REST signal metadata](https://smartcar.com/docs/api-reference/list-signals).
 
-Reconciliation uses durable leases and retry deadlines. Manual sync is queued and cannot bypass OEM throttling. HTTP 401 permits one application-token reacquisition, while 429 honors `Retry-After` and introduces persisted backoff. Application rate limits also defer other vehicle jobs. New grants may remain in provisioning while the OEM prepares data. A stale or missing signal is not proof that consent was revoked. [Smartcar rate-limit documentation](https://smartcar.com/docs/errors/api-errors/v3/rate-limit-errors).
+Each integration is checked at most once per hour by default, including reconnect warnings and temporary errors. The first check for a new binding can run immediately. Manual sync queues a check without moving an existing deadline earlier. Attempts are persisted before contacting the provider, so an expired worker lease or process restart cannot trigger another check within the hour. Reauthentication preserves the previous attempt and provider backoff. HTTP 401 permits one application-token reacquisition within a check; paginated responses may require several HTTP requests, so a check is not a promise of exactly one API request. HTTP 429 honors `Retry-After` when longer than the configured interval, and application rate limits also defer other vehicle jobs. New grants may remain in provisioning while the OEM prepares data. A stale or missing signal is not proof that consent was revoked. [Smartcar rate-limit documentation](https://smartcar.com/docs/errors/api-errors/v3/rate-limit-errors).
+
+The status includes the next scheduled check even when reconnect is recommended. A successful check timestamp is recorded only when usable, timestamped vehicle data is received; an HTTP 200 containing only failed signals does not count. Smartcar's own vehicle refresh cadence is independent of PitPilot's schedule. Repeated cached readings keep their original OEM measurement time.
 
 REST polling retrieves available current state. It cannot reconstruct every route or a history of changes between polls. Parked locations do not describe a driven route. This deployment does not need a public webhook endpoint. Webhooks can be added later with signature verification, durable event deduplication, and reconciliation for missed deliveries; they are not silently implied by periodic sync.
 
