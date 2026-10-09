@@ -16,6 +16,8 @@ Opt-in USB GPS collection records actual fixes, queues them offline and derives 
 
 [Receiver recovery](docs/receiver-recovery.md) imports actual timestamped OBD readings from a closed legacy receiver backup. It preserves raw events, reconciles exact native Pi overlaps and archives unknown-clock events without inventing timestamps.
 
+[Discarding legacy telemetry](docs/discard-legacy-signals.md) removes imported measurements and proven receiver-recovery rows while preserving native readings and vehicle records. A preview token binds the deletion to verified ownership, and a durable policy prevents accidental reimport. The app clears retired cached readings when the server history revision changes.
+
 The iOS app stores its access token in Keychain and caches records, private photos and loaded measurement history for offline reading. It does not queue offline changes. Install [0.5.2, build 25 through Fledge](https://fledge.theoutdoorprogrammer.com/a/com.theoutdoorprogrammer.pitpilot/ab0aadc29b62) on a device included in the provisioning profile. The [release history](https://github.com/TheOutdoorProgrammer/pitpilot/releases) and [feature checklist](FEATURES.md) track publication and verified behavior; apps older than 0.2.0 cannot read the imported record categories.
 
 The release includes the cancellation fix from 0.1.1. New refreshes replace older work, while genuine transport failures report a bounded diagnostic category through the authenticated telemetry relay.
