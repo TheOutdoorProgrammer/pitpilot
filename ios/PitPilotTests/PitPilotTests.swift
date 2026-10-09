@@ -54,6 +54,10 @@ final class PitPilotTests: XCTestCase {
         XCTAssertEqual(GPSStatus.label("disconnected"), "GPS receiver not connected")
         let points = [TripPoint(latitude: 1, longitude: 2, recordedAt: "2026-01-01T00:00:00Z"), TripPoint(latitude: 1, longitude: 2, recordedAt: "2026-01-01T00:02:01Z")]
         XCTAssertEqual(TripSegments.split(points, maximumGap: 120).count, 2)
+        let oldDevice = try JSONDecoder().decode(VehicleDevice.self, from: Data(#"{"id":"device","vehicleId":"vehicle","name":"Synthetic Pi","createdAt":"2026-01-01T00:00:00Z","autoUpdate":true}"#.utf8))
+        XCTAssertNil(oldDevice.gpsRecording); XCTAssertNil(oldDevice.gpsState)
+        let oldDefinition = try JSONDecoder().decode(SignalDefinition.self, from: Data(#"{"metric":"rpm","label":"Engine speed","unit":"rpm","staleAfterSeconds":900}"#.utf8))
+        XCTAssertNil(oldDefinition.description); XCTAssertNil(oldDefinition.interpretation); XCTAssertNil(oldDefinition.valueLabels)
     }
 
     @MainActor
@@ -93,6 +97,13 @@ final class PitPilotTests: XCTestCase {
         XCTAssertNotNil(store.locationErrors["vehicle"])
         XCTAssertEqual(store.cache.locations?["vehicle"]?.location?.recordedAt, "2026-01-01T00:00:00Z")
         XCTAssertTrue(store.locationsRefreshing.isEmpty)
+        let unavailableReported = expectation(description: "Old server location telemetry completed")
+        fixture.configure(.status(404), reported: unavailableReported)
+        await store.refreshLocation("vehicle")
+        await fulfillment(of: [unavailableReported], timeout: 2)
+        XCTAssertFalse(store.offline); XCTAssertNil(store.error)
+        XCTAssertTrue(store.locationErrors["vehicle"]?.contains("Update the PitPilot server") == true)
+        XCTAssertEqual(store.cache.locations?["vehicle"]?.location?.recordedAt, "2026-01-01T00:00:00Z")
     }
 
     func testPhotoAndGPSOperationsUseBoundedTelemetryNames() {
@@ -872,7 +883,7 @@ private final class DecliningSmartcarBrowser: SmartcarAuthenticating {
 }
 
 private final class HTTPFixture {
-    enum Response { case hold, success, failure(URLError.Code), json(Data), routes([String: Data]) }
+    enum Response { case hold, success, failure(URLError.Code), json(Data), routes([String: Data]), status(Int) }
     let connection: Connection
     let session: URLSession
     var client: APIClient { APIClient(connection: connection, session: session) }
@@ -946,6 +957,7 @@ private final class HTTPFixture {
         switch response {
         case .hold: break
         case .success: respond(transport, status: 200)
+        case .status(let code): respond(transport, status: code)
         case .json(let data): respond(transport, status: 200, data: data)
         case .routes(let data):
             if let body = data[transport.request.url!.path] { respond(transport, status: 200, data: body) }

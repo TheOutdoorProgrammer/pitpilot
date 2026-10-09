@@ -77,10 +77,14 @@ struct VehicleIntegrationsView: View {
                             Toggle("Automatic updates", isOn: Binding(get: { device.autoUpdate }, set: { value in Task { await model.autoUpdate(device, enabled: value) } }))
                                 .disabled(model.working).accessibilityIdentifier("deviceAutoUpdate-\(device.id)")
                             Text("Allow the collector to install signed updates when it checks in. Turning this off pauses automatic installation.").font(.caption).foregroundStyle(.secondary)
-                            Toggle("Record GPS trips", isOn: Binding(get: { device.gpsRecording == true }, set: { value in Task { await model.recordGPS(device, enabled: value) } }))
-                                .disabled(model.working || store.offline).accessibilityIdentifier("deviceGPS-\(device.id)")
-                            Text("Save this vehicle's location and routes from a supported USB GPS receiver connected to the Pi. No phone location permission is needed. Turning this off stops new collection after the Pi checks in; saved routes remain.")
-                                .font(.caption).foregroundStyle(.secondary)
+                            if device.gpsRecording != nil {
+                                Toggle("Record GPS trips", isOn: Binding(get: { device.gpsRecording == true }, set: { value in Task { await model.recordGPS(device, enabled: value) } }))
+                                    .disabled(model.working || store.offline).accessibilityIdentifier("deviceGPS-\(device.id)")
+                                Text("Save this vehicle's location and routes from a supported USB GPS receiver connected to the Pi. No phone location permission is needed. Turning this off stops new collection after the Pi checks in; saved routes remain.")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            } else {
+                                Text("Update your PitPilot server to enable GPS trip recording.").font(.caption).foregroundStyle(.secondary)
+                            }
                             if let state = device.gpsState {
                                 LabeledContent("GPS", value: GPSStatus.label(state))
                             }

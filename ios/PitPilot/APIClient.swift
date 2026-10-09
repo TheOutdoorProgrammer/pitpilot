@@ -100,7 +100,9 @@ struct APIClient {
             switch response.statusCode {
             case 200..<300: return data
             case 401, 403: throw APIError.message("Your connection is not authorized. Check the API token in Settings.")
-            case 404: throw APIError.message("This item no longer exists on the server. Refresh and try again.")
+            case 404:
+                if Self.operation(route: route, method: method) == "vehicle.location.get" { throw APIError.message("Location is unavailable. Update the PitPilot server if it does not support GPS history yet.") }
+                throw APIError.message("This item no longer exists on the server. Refresh and try again.")
             case 409: throw APIError.message("This item changed on the server. Close this form, review the refreshed record, and try again.")
             case 413: throw APIError.message("This photo is too large for the server. Choose a smaller image and try again.")
             case 400, 422: throw APIError.message("The server could not accept these values. Check the form and try again.")

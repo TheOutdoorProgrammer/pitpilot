@@ -5,7 +5,7 @@ enum IntegrationFixture {
     private static let lock = NSLock()
     private static var devices: [[String: Any]] = ProcessInfo.processInfo.arguments.contains("--ui-testing-device-stale") ? [[
         "id": "fixture-device", "vehicleId": "test-vehicle", "name": "Synthetic collector", "createdAt": "2026-01-01T00:00:00Z",
-        "autoUpdate": true, "enrolledAt": "2026-01-01T00:00:00Z", "lastSeenAt": "2026-01-01T00:00:00Z", "version": "0.3.1",
+        "autoUpdate": true, "gpsRecording": false, "enrolledAt": "2026-01-01T00:00:00Z", "lastSeenAt": "2026-01-01T00:00:00Z", "version": "0.3.1",
         "queuedBatches": 12, "rejectedSamples": 2, "collectionState": "adapter_unavailable", "updateState": "rolled_back"
     ]] : []
     private static var state = ProcessInfo.processInfo.arguments.contains("--ui-testing-smartcar-reconnect") ? "reconnect_required" : "disconnected"
@@ -33,7 +33,7 @@ enum IntegrationFixture {
         }
         if route == "/api/v1/vehicles/test-vehicle/devices" {
             if method == "POST" {
-                let device: [String: Any] = ["id": "fixture-device", "vehicleId": "test-vehicle", "name": body["name"] as? String ?? "Synthetic Pi", "createdAt": time(), "autoUpdate": true]
+                let device: [String: Any] = ["id": "fixture-device", "vehicleId": "test-vehicle", "name": body["name"] as? String ?? "Synthetic Pi", "createdAt": time(), "autoUpdate": true, "gpsRecording": false]
                 devices.append(device)
                 return (201, ["device": device, "enrollmentToken": "synthetic-pairing-token-not-a-real-secret", "expiresAt": time(600)])
             }
