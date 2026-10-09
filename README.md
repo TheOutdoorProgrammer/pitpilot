@@ -8,15 +8,17 @@ The Raspberry Pi collector pairs to a vehicle from the app, queues observations 
 
 ## Status
 
-[The current release, v0.3.1](https://github.com/TheOutdoorProgrammer/pitpilot/releases/tag/v0.3.1), improves native history charts with filled numeric trends, Off/On and code lanes, count bars, and readable date axes. The dashboard, private OpenMetrics endpoint, and generated-note conversion introduced in v0.3.0 retain source, units, quality and actual observation time. Date-only snapshots remain dates, and older readings stay visibly historical. See the [vehicle measurements guide](docs/vehicle-signals.md).
+The native vehicle dashboard includes tappable chart previews, inline identifiers, private vehicle photos and plain-language measurement explanations. Settings and integrations live in its hamburger menu. Numeric trends, Off/On and code lanes, count bars and readable date axes retain source, units, quality and actual observation time. Date-only snapshots remain dates, and older readings stay visibly historical. See the [vehicle measurements guide](docs/vehicle-signals.md).
+
+Opt-in USB GPS collection records actual fixes, queues them offline and derives previous trips with explicit recording gaps. The native map shows recorded routes and last-known location. OBD speed does not fabricate coordinates, and GPS-derived trip distance does not replace a measured odometer. Read the [GPS setup and privacy guide](docs/gps.md) before enabling recording; physical receiver and real-drive acceptance remain necessary for each installation.
 
 [LubeLogger migration](docs/lubelogger-migration.md) previews changes and applies them atomically, with duplicate prevention and conflict reporting. Supported source data and import blockers are documented in the migration guide.
 
-The iOS app stores its access token in Keychain and caches records and loaded measurement history for offline reading. It does not queue offline changes. Signed test builds are distributed through Fledge to devices included in the provisioning profile. [Install version 0.3.1](https://fledge.theoutdoorprogrammer.com/a/com.theoutdoorprogrammer.pitpilot/20f2302fd001) for the updated measurement charts; apps older than 0.2.0 cannot read the imported record categories.
+The iOS app stores its access token in Keychain and caches records, private photos and loaded measurement history for offline reading. It does not queue offline changes. Signed test builds are distributed through Fledge to devices included in the provisioning profile. The [release history](https://github.com/TheOutdoorProgrammer/pitpilot/releases) and [feature checklist](FEATURES.md) track publication and verified behavior; apps older than 0.2.0 cannot read the imported record categories.
 
 The release includes the cancellation fix from 0.1.1. New refreshes replace older work, while genuine transport failures report a bounded diagnostic category through the authenticated telemetry relay.
 
-Automatic trip recording, receipt attachments, push notifications, and CrewChief AI remain unfinished. Existing vehicle integrations should continue running until the collector handoff, Smartcar vehicle compatibility, and replacement acceptance checks pass.
+Receipt attachments, push notifications, route replay controls and CrewChief AI remain unfinished. Existing vehicle integrations should continue running until their collector handoff, vehicle compatibility and data-preservation checks pass. A legacy receiver may still be required for Home Assistant even after LubeLogger is retired.
 
 ## What we're building
 

@@ -88,6 +88,6 @@ pitpilot convert-summary-metrics \
 
 Review the `converted` and `preserved` counts, then repeat with `--apply` and the returned `previewToken`. Use `--database /private/rehearsal.db` instead of `--server` to rehearse on a backup copy. The API also provides `/api/v1/migrations/summary-metrics/preview` and `/apply` with a JSON `previewToken` field.
 
-A stale preview, changed note, invalid signal, or failed write aborts the transaction. JSON export and database backup include original conversion evidence. Reimporting an unchanged converted LubeLogger note skips it. If its source later changes, import reports `converted-summary-source-changed` instead of silently recreating the note or overwriting historical signals.
+A stale preview, changed note, invalid signal, or failed write aborts the transaction. JSON export and database backup include original conversion evidence. Reimporting an unchanged converted LubeLogger note skips it. If its source later changes, import reports `converted-summary-source-changed` by default. The migration command's explicit `--refresh-converted-summaries` option previews replacement of supported generated summaries, preserves the previous source and measurements in a versioned archive, and updates only untouched conversion-owned rows. Customized notes, changed measurements, incomplete summaries and stale previews remain conflicts. See the [migration workflow](lubelogger-migration.md).
 
 Conversion changes PitPilot only. It does not delete source LubeLogger records or redirect existing collectors.

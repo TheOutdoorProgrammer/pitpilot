@@ -6,3 +6,5 @@
 | [0004](0004-use-scoped-collectors-and-application-owned-smartcar-connect.md) | Use scoped collectors and application-owned Smartcar connections | Revocable collector credentials, signed updates, and server-side Smartcar V3 grants. |
 | [0005](0005-derive-odometers-from-measured-baselines-and-immutable-dista.md) | Derive odometers from measured baselines and immutable distance intervals | Derive odometers from measured baselines and immutable distance intervals |
 | [0006](0006-derive-automatic-trips-from-scoped-durable-gps-fixes.md) | Derive automatic trips from scoped durable GPS fixes | Opt-in actual USB GPS fixes, durable scoped delivery, replay-safe deletion and backend trip projection. |
+| [0007](0007-keep-bounded-vehicle-photos-inside-the-garage-database.md) | Keep bounded vehicle photos inside the garage database | Keep bounded vehicle photos inside the garage database |
+| [0008](0008-version-converted-summaries-before-refreshing-their-measurem.md) | Version converted summaries before refreshing their measurements | Version converted summaries before refreshing their measurements |

@@ -38,6 +38,24 @@ Connection recovery: [v0.1.1](https://github.com/TheOutdoorProgrammer/pitpilot/r
 
 ## Replacement baseline
 
+### Vehicle dashboard and GPS release
+
+- [x] Move settings, vehicle editing, Smartcar and Pi management into a native hamburger menu.
+- [x] Edit VIN and license plate, and upload or remove a private vehicle photo with embedded metadata removed.
+- [x] Show vehicle identifiers directly in the vehicle card.
+- [x] Show tappable chart previews on the vehicle dashboard, retaining measurement type, source, quality and time precision.
+- [x] Explain every catalog measurement and its state labels in plain language, including pressure units and reference points.
+- [x] Derive current mileage from actual readings and subsequent immutable Pi distance increments; handle retries, corrections and reordered uploads.
+- [x] Capture validated USB GPS fixes independently of OBD polling and queue them durably for offline upload.
+- [x] Derive automatic trips with explicit recording gaps and show previous routes and actual last-known vehicle location.
+- [x] Offer Pi recording controls, trip deletion and location-history deletion that delayed uploads cannot undo.
+- [x] Refresh changed generated LubeLogger summaries explicitly, preserving previous source documents and measurements in versioned archives.
+- [ ] Verify these new native journeys on the self-hosted runner and publish the signed release.
+- [ ] Reconcile the final household LubeLogger snapshot and retire the old deployment after verified recovery backups.
+- [ ] Validate the purchased USB receiver on the physical Pi and complete a real drive through delayed upload and native map display.
+
+The [GPS guide](docs/gps.md), [API contract](docs/api.md), [measurement guide](docs/vehicle-signals.md) and [migration workflow](docs/lubelogger-migration.md) describe the implemented contracts. Physical receiver reception, drive acceptance and final publication remain separate checks. The broader unchecked items below include functionality beyond this release.
+
 ### Garage and records
 
 - [ ] Manage multiple vehicles, identifiers, photos, preferred units, and odometer baselines or corrections.
@@ -102,13 +120,15 @@ Deployed acceptance verified ingestion, retry and conflict behavior, preserved h
 - [ ] Turn supported observations into mileage updates and reviewable suggestions; inferred events must not silently become confirmed purchases or completed work.
 - [ ] Validate actual signal availability, location cadence, connectivity requirements, and operating costs on supported vehicles.
 
-The [collector tests](internal/picollector) cover durable dual delivery, rejected empty observations, clock gating, revocation, signed artifact validation, interrupted activation, and rollback after multiple upgrades. The initial profile is read-only J1850 VPW over an already configured serial/RFCOMM adapter. Physical power-loss recovery, guided Bluetooth/network setup, and exclusive handoff from an existing reader remain acceptance work. See [collector setup](docs/picollector.md).
+The [collector tests](internal/picollector) cover durable dual delivery, rejected empty observations, clock gating, revocation, signed artifact validation, interrupted activation, and rollback after multiple upgrades. The initial profile is read-only J1850 VPW over an already configured serial/RFCOMM adapter. The first physical installation and exclusive handoff from the old collector have passed. Physical power-loss recovery and guided Bluetooth/network setup remain acceptance work. See [collector setup](docs/picollector.md).
 
 [Smartcar tests](internal/smartcar) cover authorization ownership, reconnect preservation, missing timestamps, unsupported signals, provider failures, and bounded reconciliation. Live connection requires the operator's application UUID, mounted credentials, and valid OEM consent. Polling does not implement webhooks or reconstruct driven routes. See [Smartcar setup](docs/smartcar.md).
 
 [v0.4.0](https://github.com/TheOutdoorProgrammer/pitpilot/releases/tag/v0.4.0) ships these integration foundations and [signed iOS build 13](https://fledge.theoutdoorprogrammer.com/a/com.theoutdoorprogrammer.pitpilot/9b1d5bf4c5c0). The self-hosted runner passed 39 unit tests and 10 UI journeys. Go race tests, vet and vulnerability checks passed before Quill built the GoReleaser artifacts and container. Both collector manifests and container platforms were verified. Deployed acceptance passed 27 integration checks, 18 measurement/authentication checks and 127 existing-data comparisons. All eight existing data tables were preserved, and Grafana verified correlated backend and synthetic native telemetry.
 
-Physical collector installation, real power-loss acceptance and live Smartcar authorization remain open. The current deployment leaves Smartcar disabled until the application UUID and valid OEM consent are available. The old Kubernetes Smartcar sync was retired after its credentials were reused and its vehicle mapping and state were backed up. The Grinch Pi collector and receiver remain unchanged pending their handoff.
+Physical collector installation and live Smartcar authorization have been exercised. The old collector is disabled, while the existing receiver remains necessary for Home Assistant delivery. The old Kubernetes Smartcar sync was retired after its credentials were reused and its vehicle mapping and state were backed up. Real power-loss acceptance and successful fresh OEM signal retrieval remain open; authorization alone does not prove provider recovery.
+
+[v0.4.2](https://github.com/TheOutdoorProgrammer/pitpilot/releases/tag/v0.4.2) adds backend odometer calibration and hourly Smartcar reconciliation. Its [release](https://github.com/TheOutdoorProgrammer/pitpilot/actions/runs/37877157972) passed 41 native unit tests and 10 UI journeys on the self-hosted runner. Live checks verified corrected readings, distance accumulation, duplicate protection, reordered uploads, edits and deletion. All original database rows survived the schema upgrade. Manual Smartcar sync preserves the hourly deadline; the current provider connection still requires recovery, which remains visible in the app.
 
 ### Trip history and maps
 
