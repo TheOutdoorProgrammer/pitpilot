@@ -18,11 +18,7 @@ struct VehicleDetailView: View {
     private var detail: VehicleDetail { store.detail(vehicle.id) }
     private var historyRecords: [VehicleRecord] {
         detail.records.filter { $0.kind != .plan && (filter == "all" || $0.kind.rawValue == filter) && $0.matches(search) }
-            .sorted { left, right in
-                if (left.pinned ?? false) != (right.pinned ?? false) { return left.pinned ?? false }
-                if left.date != right.date { return left.date > right.date }
-                return left.title.localizedStandardCompare(right.title) == .orderedAscending
-            }
+            .sorted(by: VehicleRecord.newestFirst)
     }
 
     var body: some View {

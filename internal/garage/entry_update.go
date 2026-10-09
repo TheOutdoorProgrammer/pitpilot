@@ -37,5 +37,14 @@ func (s *Store) UpdateEntry(ctx context.Context, id, kind string, change func(ma
 	if _, err = tx.ExecContext(ctx, "UPDATE entries SET data=? WHERE id=? AND kind=?", string(out), id, kind); err != nil {
 		return nil, err
 	}
+	if kind == "record" {
+		var record Record
+		if err = json.Unmarshal(out, &record); err != nil {
+			return nil, err
+		}
+		if err = syncRecordOdometer(ctx, tx, record); err != nil {
+			return nil, err
+		}
+	}
 	return out, tx.Commit()
 }

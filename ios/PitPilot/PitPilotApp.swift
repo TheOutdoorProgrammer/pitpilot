@@ -132,6 +132,10 @@ struct VehicleCard: View {
                     Spacer()
                     Image(systemName: "arrow.up.right").foregroundStyle(PitStyle.amber).accessibilityHidden(true)
                 }
+                if (vehicle.odometerExcludedIntervals ?? 0) > 0 {
+                    Label("Overlapping distance excluded", systemImage: "exclamationmark.triangle")
+                        .font(.caption).foregroundStyle(PitStyle.amber)
+                }
             }
             Rectangle().fill(PitStyle.amber).frame(height: 3)
         }.padding(24).background(LinearGradient(colors: [PitStyle.panel, PitStyle.panel.opacity(0.6)], startPoint: .topLeading, endPoint: .bottomTrailing), in: RoundedRectangle(cornerRadius: 24))

@@ -2,6 +2,36 @@ import XCTest
 @testable import PitPilot
 
 final class PitPilotTests: XCTestCase {
+    func testHistoryUsesCaptureTimeAcrossOffsetsAndKeepsUnknownPrecision() throws {
+        var a = VehicleRecord(id: "a", vehicleId: "v", kind: .odometer, date: "2026-10-08", title: "Z actual", notes: "", odometerMiles: 101, costCents: 0)
+        a.recordedAt = "2026-10-08T23:30:00-04:00"
+        var b = VehicleRecord(id: "b", vehicleId: "v", kind: .odometer, date: "2026-10-09", title: "A older", notes: "", odometerMiles: 100, costCents: 0)
+        b.recordedAt = "2026-10-09T02:00:00Z"
+        var unknown = VehicleRecord(id: "unknown", vehicleId: "v", kind: .odometer, date: "2026-10-08", title: "Unknown capture time", notes: "", odometerMiles: 100, costCents: 0)
+        unknown.createdAt = "2026-10-09T03:00:00Z"
+        for records in [[a,b,unknown],[unknown,b,a],[b,a,unknown]] {
+            XCTAssertEqual(records.sorted(by: VehicleRecord.newestFirst).map(\.id), ["a","b","unknown"])
+        }
+        XCTAssertEqual(unknown.dateLabel, "2026-10-08")
+        let draft = RecordDraft(record: unknown, mileage: 0)
+        XCTAssertFalse(draft.includeTime)
+        XCTAssertNil(try draft.values(original: unknown)["recordedAt"])
+    }
+
+    func testNewMeasuredReadingIncludesExplicitTimeAndKeepsOriginalTimestampOnEdit() throws {
+        var draft = RecordDraft(record: nil, mileage: 101)
+        draft.kind = .odometer; draft.title = "Dashboard reading"
+        XCTAssertEqual(draft.odometerStatus, "measured")
+        XCTAssertTrue(draft.includeTime)
+        let body = try draft.values(original: nil)
+        XCTAssertNotNil(body["recordedAt"])
+        var saved = VehicleRecord(id: "r", vehicleId: "v", kind: .odometer, date: Input.date(draft.date), title: draft.title, notes: "", odometerMiles: 101, costCents: 0, odometerStatus: "measured")
+        saved.recordedAt = body["recordedAt"] as? String
+        var edit = RecordDraft(record: saved, mileage: 101)
+        edit.title = "Corrected title"
+        XCTAssertEqual(Set(try edit.values(original: saved).keys), ["title"])
+    }
+
     func testDenseCalendarTrendPreservesDaySpacingGapsZeroAndSparseAxis() throws {
         let start = try XCTUnwrap(SignalFormat.date("2026-05-01T00:00:00Z"))
         let points = (0..<94).filter { ![23, 24, 25, 61, 62].contains($0) }.map { index in

@@ -290,6 +290,7 @@ final class GarageStore: ObservableObject {
             cache.details[record.vehicleId]?.records[index] = updated
         }
         persist()
+        await refresh()
     }
 
     func updateReminder(_ reminder: Reminder, values: [String: Any]) async throws {
@@ -316,6 +317,7 @@ final class GarageStore: ObservableObject {
             guard isCurrent(client) else { return }
             cache.details[record.vehicleId]?.records.removeAll { $0.id == record.id }
             persist()
+            await refresh()
         } catch { if isCurrent(client) { self.error = error.localizedDescription } }
     }
 

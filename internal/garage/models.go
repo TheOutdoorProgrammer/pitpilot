@@ -8,20 +8,21 @@ import (
 )
 
 type Vehicle struct {
-	ID             string       `json:"id"`
-	Name           string       `json:"name"`
-	Make           string       `json:"make"`
-	Model          string       `json:"model"`
-	Year           int          `json:"year"`
-	OdometerMiles  float64      `json:"odometerMiles"`
-	OdometerStatus string       `json:"odometerStatus,omitempty"`
-	CreatedAt      time.Time    `json:"createdAt"`
-	VIN            string       `json:"vin,omitempty"`
-	LicensePlate   string       `json:"licensePlate,omitempty"`
-	Notes          string       `json:"notes,omitempty"`
-	Tags           []string     `json:"tags,omitempty"`
-	ExtraFields    []ExtraField `json:"extraFields,omitempty"`
-	Source         *Source      `json:"source,omitempty"`
+	ID                        string       `json:"id"`
+	Name                      string       `json:"name"`
+	Make                      string       `json:"make"`
+	Model                     string       `json:"model"`
+	Year                      int          `json:"year"`
+	OdometerMiles             float64      `json:"odometerMiles"`
+	OdometerStatus            string       `json:"odometerStatus,omitempty"`
+	OdometerExcludedIntervals int          `json:"odometerExcludedIntervals,omitempty"`
+	CreatedAt                 time.Time    `json:"createdAt"`
+	VIN                       string       `json:"vin,omitempty"`
+	LicensePlate              string       `json:"licensePlate,omitempty"`
+	Notes                     string       `json:"notes,omitempty"`
+	Tags                      []string     `json:"tags,omitempty"`
+	ExtraFields               []ExtraField `json:"extraFields,omitempty"`
+	Source                    *Source      `json:"source,omitempty"`
 }
 
 type Record struct {
@@ -29,6 +30,8 @@ type Record struct {
 	VehicleID            string       `json:"vehicleId"`
 	Kind                 string       `json:"kind"`
 	Date                 string       `json:"date"`
+	RecordedAt           *time.Time   `json:"recordedAt,omitempty"`
+	CreatedAt            *time.Time   `json:"createdAt,omitempty"`
 	Title                string       `json:"title"`
 	Notes                string       `json:"notes"`
 	OdometerMiles        float64      `json:"odometerMiles"`
@@ -111,6 +114,9 @@ func (r Record) Validate() error {
 	}
 	if !validDate(r.Date) && !(r.Date == "" && (r.Kind == "note" || r.Kind == "plan")) {
 		return errors.New("date must be YYYY-MM-DD")
+	}
+	if r.RecordedAt != nil && (!signalTime(r.RecordedAt) || r.RecordedAt.Format(time.DateOnly) != r.Date || r.RecordedAt.After(time.Now().Add(5*time.Minute))) {
+		return errors.New("recordedAt must be a real capture time on the record date, not in the future")
 	}
 	if !bounded(r.OdometerMiles, 10000000) || r.CostCents < 0 || r.CostCents > 100000000000 {
 		return errors.New("invalid mileage or cost")

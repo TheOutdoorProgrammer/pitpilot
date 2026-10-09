@@ -16,6 +16,7 @@ struct Vehicle: Codable, Identifiable, Hashable {
     var extraFields: [ExtraField]?
     var source: RecordSource?
     var odometerStatus: String?
+    var odometerExcludedIntervals: Int?
     var subtitle: String { [year > 0 ? String(year) : "", make, model].filter { !$0.isEmpty }.joined(separator: " ") }
 }
 
@@ -72,7 +73,35 @@ struct VehicleRecord: Codable, Identifiable {
     var fuel: FuelDetails?
     var source: RecordSource?
 
-    var dateLabel: String { date.isEmpty ? "Undated" : date }
+    var recordedAt: String?
+    var createdAt: String?
+
+    static func timestamp(_ text: String?) -> Date? {
+        guard let text else { return nil }
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter.date(from: text) ?? ISO8601DateFormatter().date(from: text)
+    }
+
+    static func newestFirst(_ left: Self, _ right: Self) -> Bool {
+        if left.historyOrderTime != right.historyOrderTime { return left.historyOrderTime > right.historyOrderTime }
+        if (left.source == nil) != (right.source == nil) { return left.source == nil }
+        if left.date.isEmpty && (left.pinned ?? false) != (right.pinned ?? false) { return left.pinned ?? false }
+        return left.id > right.id
+    }
+
+    private var historyOrderTime: Date {
+        if let at = Self.timestamp(recordedAt) { return at }
+        guard let day = Self.timestamp(date + "T00:00:00Z") else { return .distantPast }
+        let first = day, last = day.addingTimeInterval(24 * 3600 - 0.001)
+        guard let accepted = Self.timestamp(createdAt) else { return first }
+        return min(max(accepted, first), last)
+    }
+
+    var dateLabel: String {
+        if let at = Self.timestamp(recordedAt) { return at.formatted(date: .abbreviated, time: .shortened) }
+        return date.isEmpty ? "Undated" : date
+    }
     var readingLabel: String {
         switch odometerStatus {
         case "estimated": "Estimated reading"

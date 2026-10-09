@@ -142,6 +142,7 @@ func collect(ctx context.Context, c Config, q *Queue, state *runtimeState, open 
 	bootID := rand.Text()
 	bootAt := time.Now()
 	var device Sampler
+	var previousSpeed *speedSample
 	defer func() {
 		if device != nil {
 			_ = device.Close()
@@ -154,6 +155,7 @@ func collect(ctx context.Context, c Config, q *Queue, state *runtimeState, open 
 			return
 		}
 		if !clockReady(c.TimeSyncMarker) {
+			previousSpeed = nil
 			state.set("waiting_clock")
 			if !wait(ctx, time.Duration(c.PollSeconds)*time.Second) {
 				return
@@ -184,6 +186,7 @@ func collect(ctx context.Context, c Config, q *Queue, state *runtimeState, open 
 		})
 		cancel()
 		if err != nil {
+			previousSpeed = nil
 			state.set("adapter_unavailable")
 			if device != nil {
 				_ = device.Close()
@@ -194,10 +197,18 @@ func collect(ctx context.Context, c Config, q *Queue, state *runtimeState, open 
 			drift := time.Now().UTC().Sub(started.UTC()) - time.Since(started)
 			if clockReady(c.TimeSyncMarker) && drift < 2*time.Second && drift > -2*time.Second {
 				b, err := Batch(sample, started.UTC(), rand.Text())
+				currentSpeed := speedObservation(sample, started)
+				if distance := drivingDistance(previousSpeed, currentSpeed, b.BatchID); distance != nil {
+					b.Observations = append(b.Observations, *distance)
+				}
 				if err == nil {
 					err = diag.Operation(ctx, "queue.append", func(context.Context) error {
 						return q.AppendDelivery(b, legacyEvent(c.Legacy, sample, started.UTC(), b.BatchID, bootID, started.Sub(bootAt).Milliseconds()))
 					})
+				}
+				previousSpeed = nil
+				if err == nil {
+					previousSpeed = currentSpeed
 				}
 				switch {
 				case errors.Is(err, ErrQueueFull):
@@ -209,6 +220,7 @@ func collect(ctx context.Context, c Config, q *Queue, state *runtimeState, open 
 					state.set("collecting")
 				}
 			} else {
+				previousSpeed = nil
 				state.set("waiting_clock")
 			}
 		}

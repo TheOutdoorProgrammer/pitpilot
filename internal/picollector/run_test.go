@@ -37,9 +37,15 @@ func TestUnsynchronizedClockNeverOpensAdapter(t *testing.T) {
 	}
 }
 
-type blockingSampler struct{ closed atomic.Bool }
+type blockingSampler struct {
+	closed  atomic.Bool
+	started chan struct{}
+}
 
 func (s *blockingSampler) SampleDetails(ctx context.Context) (obd.Observation, error) {
+	if s.started != nil {
+		close(s.started)
+	}
 	<-ctx.Done()
 	return obd.Observation{}, ctx.Err()
 }
@@ -53,9 +59,16 @@ func TestRuntimeCancellationClosesAdapterAndPreservesQueue(t *testing.T) {
 	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(204) }))
 	defer s.Close()
 	c := Config{Server: s.URL, StateDirectory: dir, QueueLimit: 10, PollSeconds: 5, TimeSyncMarker: marker, AllowLoopbackHTTP: true}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	adapter := &blockingSampler{}
+	adapter := &blockingSampler{started: make(chan struct{})}
+	go func() {
+		select {
+		case <-adapter.started:
+			cancel()
+		case <-ctx.Done():
+		}
+	}()
 	if err := Run(ctx, c, "0.4.0", func(context.Context) (Sampler, error) { return adapter, nil }); err != nil {
 		t.Fatal(err)
 	}

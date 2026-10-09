@@ -191,7 +191,7 @@ func (s *Server) updateVehicle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var validationErr error
-	v, err := s.store.UpdateVehicle(r.Context(), r.PathValue("id"), func(v *garage.Vehicle) error {
+	v, err := s.store.UpdateVehicle(r.Context(), r.PathValue("id"), patch.OdometerMiles != nil || patch.OdometerStatus != nil, func(v *garage.Vehicle) error {
 		if patch.Name != nil {
 			v.Name = strings.TrimSpace(*patch.Name)
 		}
@@ -288,6 +288,8 @@ func (s *Server) createRecord(w http.ResponseWriter, r *http.Request) {
 	}
 	v.ID = garage.NewID()
 	v.VehicleID = r.PathValue("id")
+	now := time.Now().UTC()
+	v.CreatedAt = &now
 	if err := s.store.SaveEntry(r.Context(), v.ID, v.VehicleID, "record", v, true); err != nil {
 		s.failure(w, r, err)
 		return

@@ -6,6 +6,10 @@ The first adapter profile supports an ELM327-compatible serial/RFCOMM adapter on
 
 The collector preserves actual observations, including the distinction between unknown diagnostics and a confirmed empty fault list. It does not manufacture fuel purchases, completed maintenance, true odometer values or GPS routes. Adapter voltage is vehicle supply voltage, not the Pi's regulated power rail. No software poweroff, kernel update, network reconfiguration or reboot is part of this service.
 
+Captured distance is sent as immutable `driving_distance_km` increments with an estimated quality and actual interval bounds. Trapezoidal speed integration uses only adjacent successfully queued readings in the same collector process, at most 30 seconds apart, with consistent monotonic and wall clocks. Missing speed, failed reads, a full queue, reconnect gaps, clock uncertainty and process restarts break continuity. The collector never owns an absolute odometer. The backend adds only intervals wholly after the latest actual reading or conservative date-only acceptance cutoff, keeping fractional miles and deduplicating retries. A newer Smartcar absolute reading becomes a new baseline. Original imported estimates remain absolute records.
+
+Overlapping intervals, including two collectors recording the same travel, are ambiguous and excluded as a group. A later overlap can retract previously estimated distance, and the dashboard shows a warning; measured baseline mileage remains intact. Missing coverage is never extrapolated. Legacy receiver dual delivery still sends the original raw observation and remains independent of PitPilot calibration.
+
 ## Installation and enrollment
 
 Use the published Linux arm64 executable on a 64-bit Pi, or amd64 on an appropriate Linux host. Confirm architecture and verify the release artifact against its signed update manifest using the pinned public key through a trusted bootstrap environment. The installer accepts a locally verified executable and does not download or execute an unverified bootstrap command.

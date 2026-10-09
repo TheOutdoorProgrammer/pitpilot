@@ -71,7 +71,7 @@ func (s *Server) updateRecord(w http.ResponseWriter, r *http.Request) {
 	patch, ok := decodePatch(w, r, map[string]bool{
 		"title": false, "date": false, "notes": false, "odometerMiles": false, "costCents": false,
 		"gallons": true, "tags": true, "extraFields": true, "pinned": false, "initialOdometerMiles": true,
-		"odometerStatus": false, "plan": true, "fuel": true,
+		"odometerStatus": false, "plan": true, "fuel": true, "recordedAt": true,
 	})
 	if !ok {
 		return

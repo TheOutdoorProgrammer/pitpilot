@@ -285,10 +285,26 @@ func (s *Store) Import(ctx context.Context, batch ImportBatch, applyToken string
 		if err != nil {
 			return report, err
 		}
+		if v.Kind == "record" {
+			var record Record
+			if err = json.Unmarshal(v.Data, &record); err != nil {
+				return report, err
+			}
+			if err = syncRecordOdometer(ctx, tx, record); err != nil {
+				return report, err
+			}
+		} else if v.Kind == "vehicle" {
+			if _, err = tx.ExecContext(ctx, "DELETE FROM odometer_baselines WHERE vehicle_id=? AND key='vehicle'", v.ID); err != nil {
+				return report, err
+			}
+		}
 		_, err = tx.ExecContext(ctx, `INSERT INTO import_sources(source,collection,source_id,target_id,target_kind,source_hash,target_hash,raw) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(source,collection,source_id) DO UPDATE SET source_hash=excluded.source_hash,target_hash=excluded.target_hash,raw=excluded.raw`, batch.Source, v.Collection, v.SourceID, v.ID, v.Kind, change.sourceHash, change.targetHash, string(v.Raw))
 		if err != nil {
 			return report, err
 		}
+	}
+	if err = seedOdometers(ctx, tx); err != nil {
+		return report, err
 	}
 	if err = tx.Commit(); err != nil {
 		return report, err

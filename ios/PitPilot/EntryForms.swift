@@ -103,7 +103,8 @@ struct AddRecordView: View {
                     TextField("What did you do?", text: $draft.title)
                     if draft.kind == .note || draft.kind == .plan { Toggle("Include a date", isOn: $draft.includeDate) }
                     if draft.includeDate || (draft.kind != .note && draft.kind != .plan) {
-                        DatePicker("Date", selection: $draft.date, displayedComponents: .date)
+                        Toggle("Include time", isOn: $draft.includeTime).accessibilityIdentifier("recordIncludeTime")
+                        DatePicker(draft.includeTime ? "Date and time" : "Date", selection: $draft.date, displayedComponents: draft.includeTime ? [.date, .hourAndMinute] : [.date]).accessibilityIdentifier("recordDate")
                     }
                     if draft.kind == .note { Toggle("Pinned", isOn: $draft.pinned) }
                 }
@@ -175,6 +176,7 @@ struct RecordDraft {
     var notes: String
     var date: Date
     var includeDate: Bool
+    var includeTime: Bool
     var mileage: String
     var initialMileage: String
     var odometerStatus: String
@@ -192,11 +194,12 @@ struct RecordDraft {
         kind = record?.kind ?? .service
         title = record?.title ?? ""
         notes = record?.notes ?? ""
-        date = record.flatMap { Input.parseDate($0.date) } ?? Date()
+        date = VehicleRecord.timestamp(record?.recordedAt) ?? record.flatMap { Input.parseDate($0.date) } ?? Date()
         includeDate = record.map { !$0.date.isEmpty } ?? true
+        includeTime = record.map { $0.recordedAt != nil } ?? true
         self.mileage = String(record?.odometerMiles ?? mileage)
         initialMileage = record?.initialOdometerMiles.map { String($0) } ?? ""
-        odometerStatus = record?.odometerStatus.flatMap { $0.isEmpty ? nil : $0 } ?? "unknown"
+        odometerStatus = record?.odometerStatus.flatMap { $0.isEmpty ? nil : $0 } ?? (record == nil ? "measured" : "unknown")
         cost = Input.moneyText(record?.costCents ?? 0)
         gallons = record?.gallons.map { String($0) } ?? ""
         pinned = record?.pinned ?? false
@@ -226,6 +229,12 @@ struct RecordDraft {
         if original?.title != cleanTitle { result["title"] = cleanTitle }
         if original?.notes != notes { result["notes"] = notes }
         if original?.date != dateText { result["date"] = dateText }
+        if includeTime && !dateText.isEmpty {
+            let formatter = ISO8601DateFormatter()
+            formatter.timeZone = .current
+            let at = formatter.string(from: date)
+            if VehicleRecord.timestamp(original?.recordedAt) != date { result["recordedAt"] = at }
+        } else if original?.recordedAt != nil { result["recordedAt"] = NSNull() }
         if kind.hasOdometer, let value = Input.number(mileage), original?.odometerMiles != value { result["odometerMiles"] = value }
         if kind.hasCost, let cents = Input.moneyCents(cost), original?.costCents != cents { result["costCents"] = cents }
         if kind == .fuel {

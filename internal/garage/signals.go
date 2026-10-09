@@ -236,7 +236,7 @@ var signalDefinitions = func() map[string]SignalDefinition {
 		"code": {"fuel_system_1_status"},
 		"kPa":  {"manifold_kpa", "tire_fl_kpa", "tire_fr_kpa", "tire_rl_kpa", "tire_rr_kpa"},
 		"deg":  {"timing_advance_deg"}, "km/h": {"speed_kph"},
-		"km": {"distance_km", "odometer_km", "range_km"}, "L": {"fuel_remaining_l"},
+		"km": {"distance_km", "driving_distance_km", "odometer_km", "range_km"}, "L": {"fuel_remaining_l"},
 	}
 	definitions := map[string]SignalDefinition{}
 	groups["km/h"] = append(groups["km/h"], "daily_top_speed_kph")
@@ -268,7 +268,7 @@ var signalDefinitions = func() map[string]SignalDefinition {
 			definitions[metric] = SignalDefinition{Metric: metric, Label: strings.ReplaceAll(metric, "_", " "), Unit: unit, StaleAfterSeconds: 900}
 		}
 	}
-	labels := map[string]string{"manifold_kpa": "Manifold pressure", "coolant_c": "Coolant temperature", "intake_c": "Intake temperature", "rpm": "Engine speed", "speed_kph": "Vehicle speed", "adapter_voltage_v": "Adapter voltage", "fuel_level_pct": "Fuel level", "oil_life_pct": "Oil life", "odometer_km": "Odometer", "range_km": "Estimated range", "distance_km": "Estimated distance"}
+	labels := map[string]string{"manifold_kpa": "Manifold pressure", "coolant_c": "Coolant temperature", "intake_c": "Intake temperature", "rpm": "Engine speed", "speed_kph": "Vehicle speed", "adapter_voltage_v": "Adapter voltage", "fuel_level_pct": "Fuel level", "oil_life_pct": "Oil life", "odometer_km": "Odometer", "range_km": "Estimated range", "distance_km": "Estimated distance", "driving_distance_km": "Captured distance"}
 	for metric, label := range labels {
 		d := definitions[metric]
 		d.Label = label
@@ -377,6 +377,11 @@ func (o SignalObservation) Validate() error {
 	}
 	if err := signalWindow(o.ObservedAt, o.PeriodStart, o.PeriodEnd, o.CalendarDate, o.Timezone); err != nil {
 		return err
+	}
+	if o.Metric == "driving_distance_km" {
+		if o.Statistic != "sum" || o.Quality != "estimated" || o.PeriodStart == nil || o.PeriodEnd == nil || o.PeriodEnd.Sub(*o.PeriodStart) > 30*time.Second || o.SourceRevision != nil || o.Value < 0 || o.Value > 400*o.PeriodEnd.Sub(*o.PeriodStart).Hours() {
+			return errors.New("driving distance requires an immutable estimated interval of at most 30 seconds within driving speed limits")
+		}
 	}
 	if o.SourceRevision != nil && (o.Statistic == "sample" || !signalTime(o.SourceRevision)) {
 		return errors.New("source revisions belong only to aggregates")

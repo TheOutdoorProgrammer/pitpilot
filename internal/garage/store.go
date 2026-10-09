@@ -48,7 +48,7 @@ func Open(filename string) (*Store, error) {
 		db.Close()
 		return nil, err
 	}
-	if version > 4 {
+	if version > 5 {
 		db.Close()
 		return nil, errors.New("database schema is newer than this server")
 	}
@@ -96,7 +96,7 @@ func Open(filename string) (*Store, error) {
 		db.Close()
 		return nil, err
 	}
-	if _, err = db.Exec("PRAGMA user_version=4"); err != nil {
+	if err = initializeOdometers(db); err != nil {
 		db.Close()
 		return nil, err
 	}
@@ -143,7 +143,17 @@ func (s *Store) Vehicles(ctx context.Context) (out []Vehicle, err error) {
 		}
 		out = append(out, v)
 	}
-	return out, rows.Err()
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return nil, err
+	}
+	for i := range out {
+		if err = s.projectOdometer(ctx, &out[i]); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
 }
 
 func (s *Store) Vehicle(ctx context.Context, id string) (v Vehicle, err error) {
@@ -157,6 +167,9 @@ func (s *Store) Vehicle(ctx context.Context, id string) (v Vehicle, err error) {
 		return v, err
 	}
 	err = json.Unmarshal(data, &v)
+	if err == nil {
+		err = s.projectOdometer(ctx, &v)
+	}
 	return v, err
 }
 
@@ -167,11 +180,21 @@ func (s *Store) CreateVehicle(ctx context.Context, v Vehicle) (err error) {
 	if err != nil {
 		return err
 	}
-	_, err = s.db.ExecContext(ctx, "INSERT INTO vehicles(id,data) VALUES(?,?)", v.ID, string(data))
-	return err
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err = tx.ExecContext(ctx, "INSERT INTO vehicles(id,data) VALUES(?,?)", v.ID, string(data)); err != nil {
+		return err
+	}
+	if err = seedOdometers(ctx, tx); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
-func (s *Store) UpdateVehicle(ctx context.Context, id string, change func(*Vehicle) error) (v Vehicle, err error) {
+func (s *Store) UpdateVehicle(ctx context.Context, id string, recalibrate bool, change func(*Vehicle) error) (v Vehicle, err error) {
 	ctx, done := operation(ctx, "db.vehicle.update")
 	defer func() { done(err) }()
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -189,6 +212,13 @@ func (s *Store) UpdateVehicle(ctx context.Context, id string, change func(*Vehic
 	if err = json.Unmarshal(data, &v); err != nil {
 		return v, err
 	}
+	previousMiles, previousStatus := v.OdometerMiles, v.OdometerStatus
+	if recalibrate {
+		if err = projectOdometer(ctx, tx, &v); err != nil {
+			return v, err
+		}
+		v.OdometerExcludedIntervals = 0
+	}
 	if err = change(&v); err != nil {
 		return v, err
 	}
@@ -199,7 +229,17 @@ func (s *Store) UpdateVehicle(ctx context.Context, id string, change func(*Vehic
 	if _, err = tx.ExecContext(ctx, "UPDATE vehicles SET data=? WHERE id=?", string(data), id); err != nil {
 		return v, err
 	}
-	return v, tx.Commit()
+	if recalibrate || v.OdometerMiles != previousMiles || v.OdometerStatus != previousStatus {
+		now := time.Now().UTC()
+		if err = putOdometerBaseline(ctx, tx, OdometerBaseline{VehicleID: v.ID, Key: "vehicle", Miles: v.OdometerMiles, Status: v.OdometerStatus, CalendarDate: now.Format(time.DateOnly), RecordedAt: &now, AcceptedAt: now}); err != nil {
+			return v, err
+		}
+	}
+	if err = tx.Commit(); err != nil {
+		return v, err
+	}
+	err = s.projectOdometer(ctx, &v)
+	return v, err
 }
 
 func (s *Store) DeleteVehicle(ctx context.Context, id string) (err error) {
@@ -246,19 +286,51 @@ func (s *Store) SaveEntry(ctx context.Context, id, vehicleID, kind string, v any
 	if err != nil {
 		return err
 	}
-	if create {
-		_, err = s.db.ExecContext(ctx, "INSERT INTO entries(id,vehicle_id,kind,data) VALUES(?,?,?,?)", id, vehicleID, kind, string(data))
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
 		return err
 	}
-	result, err := s.db.ExecContext(ctx, "UPDATE entries SET data=? WHERE id=? AND vehicle_id=? AND kind=?", string(data), id, vehicleID, kind)
-	return affected(result, err)
+	defer tx.Rollback()
+	if create {
+		_, err = tx.ExecContext(ctx, "INSERT INTO entries(id,vehicle_id,kind,data) VALUES(?,?,?,?)", id, vehicleID, kind, string(data))
+	} else {
+		var result sql.Result
+		result, err = tx.ExecContext(ctx, "UPDATE entries SET data=? WHERE id=? AND vehicle_id=? AND kind=?", string(data), id, vehicleID, kind)
+		err = affected(result, err)
+	}
+	if err != nil {
+		return err
+	}
+	if kind == "record" {
+		var record Record
+		if err = json.Unmarshal(data, &record); err != nil {
+			return err
+		}
+		if err = syncRecordOdometer(ctx, tx, record); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 func (s *Store) DeleteEntry(ctx context.Context, id, kind string) (err error) {
 	ctx, done := operation(ctx, "db.entry.delete")
 	defer func() { done(err) }()
-	result, err := s.db.ExecContext(ctx, "DELETE FROM entries WHERE id=? AND kind=?", id, kind)
-	return affected(result, err)
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	result, err := tx.ExecContext(ctx, "DELETE FROM entries WHERE id=? AND kind=?", id, kind)
+	if err = affected(result, err); err != nil {
+		return err
+	}
+	if kind == "record" {
+		if _, err = tx.ExecContext(ctx, "DELETE FROM odometer_baselines WHERE key=?", id); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 func affected(result sql.Result, err error) error {
@@ -288,6 +360,7 @@ type Export struct {
 	SignalContexts       []StoredSignalContext `json:"signalContexts"`
 	SignalBatches        []StoredSignalBatch   `json:"signalBatches"`
 	ConvertedSignalNotes []ConvertedSignalNote `json:"convertedSignalNotes"`
+	OdometerBaselines    []OdometerBaseline    `json:"odometerBaselines,omitempty"`
 }
 
 type ImportSettings struct {
@@ -387,6 +460,9 @@ func (s *Store) Export(ctx context.Context) (out Export, err error) {
 		return out, err
 	}
 	if out.ConvertedSignalNotes, err = exportSignalConversions(ctx, tx); err != nil {
+		return out, err
+	}
+	if out.OdometerBaselines, err = exportOdometerBaselines(ctx, tx); err != nil {
 		return out, err
 	}
 	return out, tx.Commit()
