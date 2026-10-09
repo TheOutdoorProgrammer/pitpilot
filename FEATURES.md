@@ -85,7 +85,7 @@ Deployed acceptance verified ingestion, retry and conflict behavior, preserved h
 - [ ] Configure supported connectivity options through guided setup and test reconnect behavior.
 - [x] Persist observations offline and upload them with retry, acknowledgement, and duplicate prevention, including independent delivery to an existing receiver.
 - [ ] Recover from power loss, intermittent adapters, incorrect clocks, and exhausted local storage without silently losing acknowledged data.
-- [ ] Show connection state, queued data, last observation, last upload, and actionable recovery guidance in the app.
+- [x] Show connection state, queued data, last observation, last upload, and actionable recovery guidance in the app.
 - [x] Let an enrolled Pi check for, download, verify, and install signed collector releases, with compatibility and health checks before acceptance.
 - [x] Preserve queued observations and configuration during automatic updates; recover from interrupted activation through a separate trusted updater and roll back failed health checks.
 - [ ] Verify native version, update status, failures, and pause controls on a physical collector; add an explicit retry control for failed updates.
@@ -105,6 +105,10 @@ Deployed acceptance verified ingestion, retry and conflict behavior, preserved h
 The [collector tests](internal/picollector) cover durable dual delivery, rejected empty observations, clock gating, revocation, signed artifact validation, interrupted activation, and rollback after multiple upgrades. The initial profile is read-only J1850 VPW over an already configured serial/RFCOMM adapter. Physical power-loss recovery, guided Bluetooth/network setup, and exclusive handoff from an existing reader remain acceptance work. See [collector setup](docs/picollector.md).
 
 [Smartcar tests](internal/smartcar) cover authorization ownership, reconnect preservation, missing timestamps, unsupported signals, provider failures, and bounded reconciliation. Live connection requires the operator's application UUID, mounted credentials, and valid OEM consent. Polling does not implement webhooks or reconstruct driven routes. See [Smartcar setup](docs/smartcar.md).
+
+[v0.4.0](https://github.com/TheOutdoorProgrammer/pitpilot/releases/tag/v0.4.0) ships these integration foundations and [signed iOS build 13](https://fledge.theoutdoorprogrammer.com/a/com.theoutdoorprogrammer.pitpilot/9b1d5bf4c5c0). The self-hosted runner passed 39 unit tests and 10 UI journeys. Go race tests, vet and vulnerability checks passed before Quill built the GoReleaser artifacts and container. Both collector manifests and container platforms were verified. Deployed acceptance passed 27 integration checks, 18 measurement/authentication checks and 127 existing-data comparisons. All eight existing data tables were preserved, and Grafana verified correlated backend and synthetic native telemetry.
+
+Physical collector installation, real power-loss acceptance and live Smartcar authorization remain open. The current deployment leaves Smartcar disabled until the application UUID and valid OEM consent are available. Existing collectors have not been replaced.
 
 ### Trip history and maps
 
