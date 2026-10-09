@@ -85,16 +85,17 @@ func (s *Server) createDevice(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) updateDevice(w http.ResponseWriter, r *http.Request) {
 	var input struct {
-		AutoUpdate *bool `json:"autoUpdate"`
+		AutoUpdate   *bool `json:"autoUpdate"`
+		GPSRecording *bool `json:"gpsRecording"`
 	}
 	if !decode(w, r, &input) {
 		return
 	}
-	if input.AutoUpdate == nil {
-		fail(w, 422, "autoUpdate is required")
+	if input.AutoUpdate == nil && input.GPSRecording == nil {
+		fail(w, 422, "autoUpdate or gpsRecording is required")
 		return
 	}
-	out, err := s.store.SetDeviceAutoUpdate(r.Context(), r.PathValue("id"), *input.AutoUpdate)
+	out, err := s.store.SetDevicePolicy(r.Context(), r.PathValue("id"), input.AutoUpdate, input.GPSRecording)
 	if err != nil {
 		s.failure(w, r, err)
 		return
@@ -138,7 +139,14 @@ func (s *Server) deviceConfig(w http.ResponseWriter, r *http.Request) {
 		s.deviceFailure(w, r, err)
 		return
 	}
-	respond(w, 200, out)
+	var gps *bool
+	if r.Header.Get("X-PitPilot-Capabilities") == "gps-v1" {
+		gps = &out.GPSRecording
+	}
+	respond(w, 200, struct {
+		garage.DeviceConfiguration
+		GPSRecording *bool `json:"gpsRecording,omitempty"`
+	}{out, gps})
 }
 
 func (s *Server) deviceHeartbeat(w http.ResponseWriter, r *http.Request) {

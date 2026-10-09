@@ -260,7 +260,7 @@ func newUpdateFixture(t *testing.T) *updateFixture {
 	marker := filepath.Join(dir, "synchronized")
 	os.WriteFile(marker, nil, 0600)
 	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(DeviceConfig{"pi", "vehicle", f.enabled, 1})
+		json.NewEncoder(w).Encode(DeviceConfig{DeviceID: "pi", VehicleID: "vehicle", AutoUpdate: f.enabled, ProtocolVersion: 1})
 	}))
 	t.Cleanup(s.Close)
 	f.c = Config{Server: s.URL, StateDirectory: data, TimeSyncMarker: marker, UpdateManifestURL: "https://downloads.example/latest.json", AllowLoopbackHTTP: true}

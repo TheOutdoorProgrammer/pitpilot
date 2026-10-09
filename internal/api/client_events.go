@@ -11,6 +11,7 @@ import (
 )
 
 var clientOperations = map[string]bool{
+	"vehicle.location.get": true, "vehicle.location.delete": true,
 	"vehicles.list": true, "vehicle.get": true, "vehicle.create": true, "vehicle.update": true, "vehicle.delete": true,
 	"vehicle.photo.get": true, "vehicle.photo.put": true, "vehicle.photo.delete": true,
 	"records.list": true, "record.create": true, "record.update": true, "record.delete": true,

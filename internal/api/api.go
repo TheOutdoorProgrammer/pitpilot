@@ -60,9 +60,11 @@ func NewWithOptions(store *garage.Store, token string, logger *slog.Logger, opti
 	register("POST /api/v1/vehicles/{id}/reminders", s.createReminder)
 	register("PATCH /api/v1/reminders/{id}", s.updateReminder)
 	register("DELETE /api/v1/reminders/{id}", s.deleteEntry("reminder"))
-	register("GET /api/v1/vehicles/{id}/trips", s.listEntries("trip"))
+	register("GET /api/v1/vehicles/{id}/trips", s.trips)
 	register("POST /api/v1/vehicles/{id}/trips", s.createTrip)
 	register("DELETE /api/v1/trips/{id}", s.deleteEntry("trip"))
+	register("GET /api/v1/vehicles/{id}/location", s.location)
+	register("DELETE /api/v1/vehicles/{id}/location-history", s.clearLocationHistory)
 	register("GET /api/v1/export", s.export)
 	register("POST /api/v1/client-events", s.clientEvent)
 	s.registerMigration(register)
@@ -325,6 +327,10 @@ func (s *Server) createReminder(w http.ResponseWriter, r *http.Request) {
 func (s *Server) createTrip(w http.ResponseWriter, r *http.Request) {
 	var v garage.Trip
 	if !decode(w, r, &v) || !validate(w, v.Validate()) || !s.hasVehicle(w, r) {
+		return
+	}
+	if v.Source != "" || v.DistanceQuality != "" || v.RecordedPointCount != 0 || v.RouteSimplified {
+		fail(w, 422, "derived trip metadata is managed by the server")
 		return
 	}
 	v.ID = garage.NewID()

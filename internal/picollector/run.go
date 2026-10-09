@@ -29,6 +29,8 @@ type runtimeState struct {
 	sync.Mutex
 	collection string
 	paused     bool
+	gps        string
+	gpsEnabled bool
 }
 
 func (s *runtimeState) state() (string, bool) {
@@ -70,13 +72,16 @@ func Run(ctx context.Context, c Config, version string, open OpenSampler) error 
 	if open == nil {
 		open = func(ctx context.Context) (Sampler, error) { return obd.Open(ctx, c.SerialPort, c.Baud) }
 	}
-	state := &runtimeState{collection: "starting"}
+	state := &runtimeState{collection: "starting", gpsEnabled: readGPSPolicy(c.StateDirectory, id.DeviceID)}
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	var wg sync.WaitGroup
 	wg.Add(2)
 	go func() { defer wg.Done(); collect(ctx, c, q, state, open) }()
 	go func() { defer wg.Done(); upload(ctx, q, client, state) }()
+	wg.Add(2)
+	go func() { defer wg.Done(); collectGPS(ctx, c, q, state) }()
+	go func() { defer wg.Done(); refreshGPSPolicy(ctx, c.StateDirectory, id.DeviceID, client, state) }()
 	if legacyClient != nil {
 		wg.Add(1)
 		go func() { defer wg.Done(); uploadLegacy(ctx, q, legacyClient) }()
@@ -115,7 +120,13 @@ func Run(ctx context.Context, c Config, version string, open OpenSampler) error 
 			cancel()
 			return errors.New("queue status unavailable")
 		}
-		_ = client.Heartbeat(ctx, Heartbeat{Version: version, QueuedBatches: count, CollectionState: cs, UpdateState: us, RejectedSamples: rejected, LastObservedAt: observed, LastUploadAt: uploaded})
+		state.Lock()
+		gpsState := state.gps
+		state.Unlock()
+		if gpsState == "disabled" {
+			gpsState = ""
+		}
+		_ = client.Heartbeat(ctx, Heartbeat{Version: version, QueuedBatches: count, CollectionState: cs, UpdateState: us, RejectedSamples: rejected, LastObservedAt: observed, LastUploadAt: uploaded, GPSState: gpsState})
 		select {
 		case <-ctx.Done():
 			return nil

@@ -32,6 +32,7 @@ type DeviceConfig struct {
 	VehicleID       string `json:"vehicleId"`
 	AutoUpdate      bool   `json:"autoUpdate"`
 	ProtocolVersion int    `json:"protocolVersion"`
+	GPSRecording    bool   `json:"gpsRecording,omitempty"`
 }
 type Heartbeat struct {
 	Version         string     `json:"version"`
@@ -41,6 +42,7 @@ type Heartbeat struct {
 	RejectedSamples uint64     `json:"rejectedSamples"`
 	LastObservedAt  *time.Time `json:"lastObservedAt,omitempty"`
 	LastUploadAt    *time.Time `json:"lastUploadAt,omitempty"`
+	GPSState        string     `json:"gpsState,omitempty"`
 }
 type HTTPError struct {
 	Status     int
@@ -82,6 +84,7 @@ func (c *Client) request(ctx context.Context, method, path string, body, target 
 			return diag.NewError("request", nil)
 		}
 		r.Header.Set("Content-Type", "application/json")
+		r.Header.Set("X-PitPilot-Capabilities", "gps-v1")
 		if c.token != "" {
 			r.Header.Set("Authorization", "Bearer "+c.token)
 		}

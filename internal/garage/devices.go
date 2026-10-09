@@ -18,14 +18,15 @@ var ErrDeviceUnauthorized = errors.New("device authorization expired or revoked"
 var ErrDeviceLimit = errors.New("vehicle has too many active devices")
 
 type Device struct {
-	ID         string     `json:"id"`
-	VehicleID  string     `json:"vehicleId"`
-	Name       string     `json:"name"`
-	CreatedAt  time.Time  `json:"createdAt"`
-	AutoUpdate bool       `json:"autoUpdate"`
-	EnrolledAt *time.Time `json:"enrolledAt,omitempty"`
-	RevokedAt  *time.Time `json:"revokedAt,omitempty"`
-	LastSeenAt *time.Time `json:"lastSeenAt,omitempty"`
+	ID           string     `json:"id"`
+	VehicleID    string     `json:"vehicleId"`
+	Name         string     `json:"name"`
+	CreatedAt    time.Time  `json:"createdAt"`
+	AutoUpdate   bool       `json:"autoUpdate"`
+	GPSRecording bool       `json:"gpsRecording"`
+	EnrolledAt   *time.Time `json:"enrolledAt,omitempty"`
+	RevokedAt    *time.Time `json:"revokedAt,omitempty"`
+	LastSeenAt   *time.Time `json:"lastSeenAt,omitempty"`
 	*DeviceHeartbeat
 }
 
@@ -37,6 +38,7 @@ type DeviceHeartbeat struct {
 	RejectedSamples uint64     `json:"rejectedSamples"`
 	CollectionState string     `json:"collectionState,omitempty"`
 	UpdateState     string     `json:"updateState,omitempty"`
+	GPSState        string     `json:"gpsState,omitempty"`
 }
 
 func (h DeviceHeartbeat) Validate() error {
@@ -58,6 +60,11 @@ func (h DeviceHeartbeat) Validate() error {
 	default:
 		return errors.New("invalid update state")
 	}
+	switch h.GPSState {
+	case "", "disabled", "disconnected", "waiting_clock", "waiting_fix", "fix", "queue_full", "paused":
+	default:
+		return errors.New("invalid GPS state")
+	}
 	return nil
 }
 
@@ -71,6 +78,7 @@ type DeviceConfiguration struct {
 	DeviceID        string `json:"deviceId"`
 	VehicleID       string `json:"vehicleId"`
 	AutoUpdate      bool   `json:"autoUpdate"`
+	GPSRecording    bool   `json:"-"`
 	ProtocolVersion int    `json:"protocolVersion"`
 }
 
@@ -208,7 +216,7 @@ func (s *Store) EnrollDevice(ctx context.Context, token string) (out EnrolledDev
 }
 
 func deviceConfiguration(d Device) DeviceConfiguration {
-	return DeviceConfiguration{DeviceID: d.ID, VehicleID: d.VehicleID, AutoUpdate: d.AutoUpdate, ProtocolVersion: 1}
+	return DeviceConfiguration{DeviceID: d.ID, VehicleID: d.VehicleID, AutoUpdate: d.AutoUpdate, GPSRecording: d.GPSRecording, ProtocolVersion: 1}
 }
 
 func readDevice(ctx context.Context, tx *sql.Tx, predicate, key string) (Device, error) {
@@ -253,6 +261,10 @@ func saveDevice(ctx context.Context, tx *sql.Tx, d Device) error {
 }
 
 func (s *Store) SetDeviceAutoUpdate(ctx context.Context, id string, enabled bool) (out Device, err error) {
+	return s.SetDevicePolicy(ctx, id, &enabled, nil)
+}
+
+func (s *Store) SetDevicePolicy(ctx context.Context, id string, autoUpdate, gpsRecording *bool) (out Device, err error) {
 	ctx, done := operation(ctx, "db.device.policy")
 	defer func() { done(err) }()
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -267,7 +279,12 @@ func (s *Store) SetDeviceAutoUpdate(ctx context.Context, id string, enabled bool
 	if err != nil {
 		return out, err
 	}
-	out.AutoUpdate = enabled
+	if autoUpdate != nil {
+		out.AutoUpdate = *autoUpdate
+	}
+	if gpsRecording != nil {
+		out.GPSRecording = *gpsRecording
+	}
 	if err = saveDevice(ctx, tx, out); err != nil {
 		return out, err
 	}
@@ -370,6 +387,9 @@ func (s *Store) IngestDeviceSignals(ctx context.Context, token string, batch Sig
 	}
 	for i := range batch.Contexts {
 		batch.Contexts[i].Key = key(batch.Contexts[i].Key)
+		if location := batch.Contexts[i].Location; location != nil && location.Type == "gps" {
+			location.RecordingID = key(location.RecordingID)
+		}
 	}
 	report, err = ingestSignalsTx(ctx, tx, d.VehicleID, batch)
 	if err != nil {

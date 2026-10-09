@@ -10,7 +10,7 @@ These routes require the household bearer token:
 | --- | --- |
 | `POST /api/v1/vehicles/{id}/devices` | Accept `{"name":"Garage Pi"}` and return a device, one-time `enrollmentToken`, and `expiresAt` |
 | `GET /api/v1/vehicles/{id}/devices` | List enrollment, revocation, update policy, and last reported status |
-| `PATCH /api/v1/devices/{id}` | Set `{"autoUpdate":false}` or `true` |
+| `PATCH /api/v1/devices/{id}` | Set either or both `autoUpdate` and `gpsRecording` boolean policies |
 | `DELETE /api/v1/devices/{id}` | Revoke access immediately; preserve observations |
 
 Enrollment expires after 15 minutes. An enrolled or expired token cannot be reused. A vehicle supports up to 16 active or pending devices; revoke abandoned pairings before creating more. Revoking repeatedly is safe. Deleting a vehicle also removes its device authorizations.
@@ -30,6 +30,8 @@ The following routes require that collector token:
 | `POST /api/v1/device/signals` | Accept a canonical signal batch; return its original `batchId` and ingestion counts |
 
 Heartbeat fields are `version`, `queuedBatches`, `rejectedSamples`, `collectionState`, and `updateState`. Optional `lastObservedAt` and `lastUploadAt` report actual collection and acknowledged PitPilot upload times. The server records `lastSeenAt` itself. A recent heartbeat establishes contact with the collector, not ignition state or available sensor readings.
+
+GPS recording defaults to false. Optional heartbeat `gpsState` is `disabled`, `disconnected`, `waiting_clock`, `waiting_fix`, `fix`, `queue_full` or `paused`. GPS-capable collectors send `X-PitPilot-Capabilities: gps-v1`; only then does the configuration response include `gpsRecording`. Requests without this header retain the original exact configuration shape, allowing older strict decoders and their independent updater to continue working. Enrollment retains its original shape. Cached GPS policy lives in a separate private file, never in the legacy identity document. See [GPS behavior and privacy](gps.md).
 
 Collection states: `starting`, `waiting_clock`, `collecting`, `adapter_unavailable`, `paused`, `queue_full`. Update states: `idle`, `checking`, `downloading`, `staged`, `applying`, `healthy`, `rolled_back`, `failed`, `disabled`.
 

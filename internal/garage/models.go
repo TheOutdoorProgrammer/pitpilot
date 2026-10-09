@@ -70,13 +70,17 @@ type Point struct {
 }
 
 type Trip struct {
-	ID            string    `json:"id"`
-	VehicleID     string    `json:"vehicleId"`
-	Title         string    `json:"title"`
-	StartedAt     time.Time `json:"startedAt"`
-	EndedAt       time.Time `json:"endedAt"`
-	DistanceMiles float64   `json:"distanceMiles"`
-	Points        []Point   `json:"points"`
+	ID                 string    `json:"id"`
+	VehicleID          string    `json:"vehicleId"`
+	Title              string    `json:"title"`
+	StartedAt          time.Time `json:"startedAt"`
+	EndedAt            time.Time `json:"endedAt"`
+	DistanceMiles      float64   `json:"distanceMiles"`
+	Points             []Point   `json:"points"`
+	Source             string    `json:"source,omitempty"`
+	DistanceQuality    string    `json:"distanceQuality,omitempty"`
+	RecordedPointCount int       `json:"recordedPointCount,omitempty"`
+	RouteSimplified    bool      `json:"routeSimplified,omitempty"`
 }
 
 func bounded(v float64, max float64) bool {

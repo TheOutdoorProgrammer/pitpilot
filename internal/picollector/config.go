@@ -24,6 +24,7 @@ type Config struct {
 	UpdateManifestURL string        `json:"updateManifestUrl"`
 	AllowLoopbackHTTP bool          `json:"allowLoopbackHttp,omitempty"`
 	Legacy            *LegacyConfig `json:"legacy,omitempty"`
+	GPS               *GPSConfig    `json:"gps,omitempty"`
 }
 
 func ReadConfig(path string) (Config, error) {
@@ -45,6 +46,14 @@ func ReadConfig(path string) (Config, error) {
 		u, err := endpoint(c.Legacy.Endpoint, c.AllowLoopbackHTTP)
 		if err != nil || u.Path != "/v1/obd/events" || !legacyIdentifier.MatchString(c.Legacy.DeviceID) || !filepath.IsAbs(c.Legacy.TokenFile) {
 			return c, errors.New("invalid legacy receiver configuration")
+		}
+	}
+	if c.GPS != nil {
+		if err = c.GPS.Validate(); err != nil {
+			return c, err
+		}
+		if c.GPS.SerialPort == c.SerialPort {
+			return c, errors.New("GPS and OBD require different serial devices")
 		}
 	}
 	return c, nil

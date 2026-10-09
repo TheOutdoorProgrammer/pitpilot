@@ -18,6 +18,7 @@ var records = []byte("batches")
 var metadata = []byte("metadata")
 var pendingPi = []byte("pending_pi")
 var pendingLegacy = []byte("pending_legacy")
+var pendingGPS = []byte("pending_gps")
 
 type Queue struct {
 	db    *bbolt.DB
@@ -28,6 +29,7 @@ type Pending struct {
 	Batch    garage.SignalBatch
 	Legacy   *LegacyEvent
 	raw      []byte
+	gps      bool
 }
 type queueRecord struct {
 	Batch  garage.SignalBatch `json:"batch"`
@@ -47,7 +49,7 @@ func OpenQueue(dir, deviceID string, limit int, legacyID ...string) (*Queue, err
 	}
 	q := &Queue{db, limit}
 	err = db.Update(func(tx *bbolt.Tx) error {
-		for _, bucket := range [][]byte{pendingPi, pendingLegacy} {
+		for _, bucket := range [][]byte{pendingPi, pendingLegacy, pendingGPS} {
 			if _, err := tx.CreateBucketIfNotExists(bucket); err != nil {
 				return err
 			}
@@ -91,13 +93,31 @@ func (q *Queue) Append(b garage.SignalBatch) error {
 	return q.AppendDelivery(b, nil)
 }
 func (q *Queue) AppendDelivery(b garage.SignalBatch, legacy *LegacyEvent) error {
+	return q.appendDelivery(b, legacy, false)
+}
+
+// GPS has no legacy OBD equivalent. Its own durable acknowledgement must not
+// synthesize an empty receiver event or release pending OBD deliveries.
+func (q *Queue) AppendGPS(b garage.SignalBatch) error {
+	if len(b.Observations) != 0 || len(b.Contexts) == 0 {
+		return errors.New("GPS queue requires only locations")
+	}
+	for _, c := range b.Contexts {
+		if c.Kind != "location" || c.Location == nil || c.Location.Type != "gps" {
+			return errors.New("GPS queue requires only locations")
+		}
+	}
+	return q.appendDelivery(b, nil, true)
+}
+
+func (q *Queue) appendDelivery(b garage.SignalBatch, legacy *LegacyEvent, gpsOnly bool) error {
 	if err := b.Validate(); err != nil {
 		return err
 	}
 	full := false
 	err := q.db.Update(func(tx *bbolt.Tx) error {
 		bound := string(tx.Bucket(metadata).Get([]byte("legacy")))
-		if (legacy == nil && bound != "") || (legacy != nil && (bound == "" || legacy.DeviceID != bound)) {
+		if (legacy == nil && bound != "" && !gpsOnly) || (legacy != nil && (bound == "" || legacy.DeviceID != bound)) {
 			return errors.New("legacy delivery must match queue enrollment")
 		}
 		bucket := tx.Bucket(records)
@@ -140,7 +160,11 @@ func (q *Queue) AppendDelivery(b garage.SignalBatch, legacy *LegacyEvent) error 
 				return err
 			}
 		}
-		if err = tx.Bucket(pendingPi).Put(key, []byte{1}); err != nil {
+		index := pendingPi
+		if gpsOnly {
+			index = pendingGPS
+		}
+		if err = tx.Bucket(index).Put(key, []byte{1}); err != nil {
 			return err
 		}
 		if legacy != nil {
@@ -162,6 +186,13 @@ func (q *Queue) FirstLegacy() (Pending, bool, error) { return q.first(pendingLeg
 func (q *Queue) first(index []byte) (p Pending, ok bool, err error) {
 	err = q.db.View(func(tx *bbolt.Tx) error {
 		k, _ := tx.Bucket(index).Cursor().First()
+		if bytes.Equal(index, pendingPi) {
+			gpsKey, _ := tx.Bucket(pendingGPS).Cursor().First()
+			if gpsKey != nil && (k == nil || bytes.Compare(gpsKey, k) < 0) {
+				k = gpsKey
+				p.gps = true
+			}
+		}
 		if k == nil {
 			return nil
 		}
@@ -180,6 +211,9 @@ func (q *Queue) first(index []byte) (p Pending, ok bool, err error) {
 	return
 }
 func (q *Queue) Ack(p Pending) error {
+	if p.gps {
+		return q.ack(p, pendingGPS)
+	}
 	return q.ack(p, pendingPi)
 }
 func (q *Queue) AckLegacy(p Pending) error { return q.ack(p, pendingLegacy) }
@@ -193,12 +227,12 @@ func (q *Queue) ack(p Pending, index []byte) error {
 		if err := tx.Bucket(index).Delete(key); err != nil {
 			return err
 		}
-		if bytes.Equal(index, pendingPi) {
+		if bytes.Equal(index, pendingPi) || bytes.Equal(index, pendingGPS) {
 			if err := tx.Bucket(metadata).Put([]byte("last_upload"), []byte(time.Now().UTC().Format(time.RFC3339Nano))); err != nil {
 				return err
 			}
 		}
-		if tx.Bucket(pendingPi).Get(key) == nil && tx.Bucket(pendingLegacy).Get(key) == nil {
+		if tx.Bucket(pendingPi).Get(key) == nil && tx.Bucket(pendingLegacy).Get(key) == nil && tx.Bucket(pendingGPS).Get(key) == nil {
 			return b.Delete(key)
 		}
 		return nil

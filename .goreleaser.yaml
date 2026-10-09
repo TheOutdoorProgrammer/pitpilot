@@ -53,6 +53,7 @@ archives:
     files:
       - docs/picollector.md
       - docs/device-api.md
+      - docs/gps.md
       - deploy/picollector/*
       - scripts/picollector-install.sh
 

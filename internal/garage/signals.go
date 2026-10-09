@@ -214,6 +214,13 @@ type SignalLocation struct {
 	Longitude      float64  `json:"longitude"`
 	Type           string   `json:"type"`
 	AccuracyMeters *float64 `json:"accuracyMeters,omitempty"`
+	RecordingID    string   `json:"recordingId,omitempty"`
+	SpeedKPH       *float64 `json:"speedKph,omitempty"`
+	CourseDegrees  *float64 `json:"courseDegrees,omitempty"`
+	AltitudeMeters *float64 `json:"altitudeMeters,omitempty"`
+	Satellites     *int     `json:"satellites,omitempty"`
+	HDOP           *float64 `json:"hdop,omitempty"`
+	FixQuality     *int     `json:"fixQuality,omitempty"`
 }
 
 type SignalIngestReport struct {
@@ -511,6 +518,19 @@ func (c SignalContext) Validate() error {
 		}
 		if v.AccuracyMeters != nil && !bounded(*v.AccuracyMeters, 1e7) {
 			return errors.New("invalid location accuracy")
+		}
+		if v.Type == "gps" {
+			if c.ObservedAt != nil && c.ObservedAt.After(time.Now().Add(time.Minute)) {
+				return errors.New("GPS observation is in the future")
+			}
+			if c.ObservedAt == nil || !validSignalKey(v.RecordingID) || v.FixQuality == nil || (*v.FixQuality != 1 && *v.FixQuality != 2 && *v.FixQuality != 4 && *v.FixQuality != 5) || v.Satellites == nil || *v.Satellites < 3 || *v.Satellites > 99 || v.HDOP == nil || !bounded(*v.HDOP, 50) || *v.HDOP == 0 {
+				return errors.New("GPS requires an actual fix time, recording identity and GNSS quality")
+			}
+			if v.SpeedKPH != nil && !bounded(*v.SpeedKPH, 400) || v.CourseDegrees != nil && (!bounded(*v.CourseDegrees, 360) || *v.CourseDegrees == 360) || v.AltitudeMeters != nil && (!finiteSignal(*v.AltitudeMeters) || *v.AltitudeMeters < -1000 || *v.AltitudeMeters > 20000) {
+				return errors.New("invalid GPS motion or altitude")
+			}
+		} else if v.RecordingID != "" || v.FixQuality != nil || v.Satellites != nil || v.HDOP != nil || v.SpeedKPH != nil || v.CourseDegrees != nil || v.AltitudeMeters != nil {
+			return errors.New("GPS metadata requires a GPS location")
 		}
 	default:
 		return errors.New("invalid context kind")

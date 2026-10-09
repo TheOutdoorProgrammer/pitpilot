@@ -176,6 +176,16 @@ func ingestSignalsTx(ctx context.Context, tx *sql.Tx, vehicleID string, batch Si
 		}
 	}
 	for _, c := range batch.Contexts {
+		if batch.Source == "pi" && isGPS(c) {
+			excluded, e := gpsExcluded(ctx, tx, vehicleID, c)
+			if e != nil {
+				return report, e
+			}
+			if excluded {
+				report.ContextsSkipped++
+				continue
+			}
+		}
 		raw, _ := json.Marshal(c)
 		var previous []byte
 		err = tx.QueryRowContext(ctx, "SELECT data FROM signal_contexts WHERE vehicle_id=? AND source=? AND key=?", vehicleID, batch.Source, c.Key).Scan(&previous)
@@ -196,6 +206,9 @@ func ingestSignalsTx(ctx context.Context, tx *sql.Tx, vehicleID string, batch Si
 		report.ContextsCreated++
 	}
 	_, err = tx.ExecContext(ctx, "INSERT INTO signal_batches(vehicle_id,source,batch_id,hash) VALUES(?,?,?,?) ON CONFLICT DO NOTHING", vehicleID, batch.Source, batch.BatchID, hash)
+	if err == nil && report.ContextsCreated > 0 {
+		err = rebuildGPSRecordings(ctx, tx, vehicleID, batch)
+	}
 	return
 }
 

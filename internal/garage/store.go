@@ -100,6 +100,10 @@ func Open(filename string) (*Store, error) {
 		db.Close()
 		return nil, err
 	}
+	if err = initializeAutomaticTrips(db); err != nil {
+		db.Close()
+		return nil, err
+	}
 	if err = initializeVehiclePhotos(db); err != nil {
 		db.Close()
 		return nil, err
@@ -327,7 +331,12 @@ func (s *Store) DeleteEntry(ctx context.Context, id, kind string) (err error) {
 	defer tx.Rollback()
 	result, err := tx.ExecContext(ctx, "DELETE FROM entries WHERE id=? AND kind=?", id, kind)
 	if err = affected(result, err); err != nil {
-		return err
+		if kind != "trip" || !errors.Is(err, ErrNotFound) {
+			return err
+		}
+		if err = deleteAutomaticTrip(ctx, tx, id); err != nil {
+			return err
+		}
 	}
 	if kind == "record" {
 		if _, err = tx.ExecContext(ctx, "DELETE FROM odometer_baselines WHERE key=?", id); err != nil {
@@ -366,6 +375,9 @@ type Export struct {
 	ConvertedSignalNotes []ConvertedSignalNote `json:"convertedSignalNotes"`
 	OdometerBaselines    []OdometerBaseline    `json:"odometerBaselines,omitempty"`
 	VehiclePhotos        []VehiclePhoto        `json:"vehiclePhotos,omitempty"`
+	AutomaticTrips       []Trip                `json:"automaticTrips,omitempty"`
+	GPSHistoryExclusions []GPSHistoryExclusion `json:"gpsHistoryExclusions,omitempty"`
+	GPSHistoryPolicies   []GPSHistoryPolicy    `json:"gpsHistoryPolicies,omitempty"`
 }
 
 type ImportSettings struct {
@@ -471,6 +483,9 @@ func (s *Store) Export(ctx context.Context) (out Export, err error) {
 		return out, err
 	}
 	if out.VehiclePhotos, err = exportVehiclePhotos(ctx, tx); err != nil {
+		return out, err
+	}
+	if err = exportGPS(ctx, tx, &out); err != nil {
 		return out, err
 	}
 	return out, tx.Commit()
