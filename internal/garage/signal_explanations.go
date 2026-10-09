@@ -4,6 +4,20 @@ import "strings"
 
 type signalExplanation struct{ description, interpretation string }
 
+func signalValueLabels(metric string) map[string]string {
+	switch {
+	case strings.HasPrefix(metric, "readiness_") && strings.HasSuffix(metric, "_ready"):
+		return map[string]string{"0": "Not ready", "1": "Ready"}
+	case metric == "ignition_compression":
+		return map[string]string{"0": "Spark", "1": "Compression"}
+	case metric == "mil_on":
+		return map[string]string{"0": "Off", "1": "On"}
+	case metric == "fuel_system_1_status" || metric == "fuel_system_2_status":
+		return map[string]string{"0": "Unknown", "1": "Open loop: warm-up", "2": "Closed loop", "4": "Open loop: driving", "8": "Open loop: fault", "16": "Closed loop: fault"}
+	}
+	return nil
+}
+
 var signalExplanations = map[string]signalExplanation{
 	"manifold_kpa":                {"Air pressure inside the engine's intake manifold, measured relative to a vacuum.", "This is intake air pressure, not tire or fuel pressure. Compare it with barometric pressure and engine load. It changes with throttle, altitude and engine design; one reading does not diagnose a fault."},
 	"barometric_kpa":              {"Atmospheric air pressure reported by the vehicle.", "Weather and altitude affect this value. It provides context for intake manifold pressure; absolute pressure uses a vacuum as its reference."},

@@ -16,12 +16,13 @@ import (
 )
 
 type SignalDefinition struct {
-	Metric            string `json:"metric"`
-	Label             string `json:"label"`
-	Unit              string `json:"unit"`
-	StaleAfterSeconds int    `json:"staleAfterSeconds"`
-	Description       string `json:"description,omitempty"`
-	Interpretation    string `json:"interpretation,omitempty"`
+	Metric            string            `json:"metric"`
+	Label             string            `json:"label"`
+	Unit              string            `json:"unit"`
+	StaleAfterSeconds int               `json:"staleAfterSeconds"`
+	Description       string            `json:"description,omitempty"`
+	Interpretation    string            `json:"interpretation,omitempty"`
+	ValueLabels       map[string]string `json:"valueLabels,omitempty"`
 }
 
 type SignalObservation struct {
@@ -300,6 +301,7 @@ var signalDefinitions = func() map[string]SignalDefinition {
 			}
 		}
 		d.Description, d.Interpretation = explainSignal(metric)
+		d.ValueLabels = signalValueLabels(metric)
 		definitions[metric] = d
 	}
 	return definitions
