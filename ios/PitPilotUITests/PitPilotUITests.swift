@@ -399,11 +399,16 @@ final class PitPilotUITests: XCTestCase {
         XCTAssertTrue(app.buttons["chooseVehiclePhoto"].waitForExistence(timeout: 5))
         app.buttons["Remove photo"].tap()
         let vin = app.textFields["vehicleVIN"]
-        reveal(vin, app); vin.tap()
+        reveal(vin, app)
+        // The center of a trailing-aligned field can place the cursor before its text.
+        vin.coordinate(withNormalizedOffset: CGVector(dx: 0.99, dy: 0.5)).tap()
         vin.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: "SYNTHETIC-VIN".count) + "UPDATED-VIN")
+        XCTAssertEqual(vin.value as? String, "UPDATED-VIN")
         let plate = app.textFields["vehicleLicensePlate"]
-        reveal(plate, app); plate.tap()
+        reveal(plate, app)
+        plate.coordinate(withNormalizedOffset: CGVector(dx: 0.99, dy: 0.5)).tap()
         plate.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: "TEST-ONLY".count) + "NEW-PLATE")
+        XCTAssertEqual(plate.value as? String, "NEW-PLATE")
         capture("Editable VIN and license plate", app)
         app.buttons["Save"].tap()
         XCTAssertTrue(vin.waitForNonExistence(timeout: 5))
