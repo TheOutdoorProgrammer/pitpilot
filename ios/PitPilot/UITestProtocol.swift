@@ -166,7 +166,7 @@ final class UITestProtocol: URLProtocol {
             result["definitions"] = definitions
             var series = result["series"] as! [[String: Any]]
             series.append(["metric": "speed_kph", "unit": "km/h", "source": "pi", "statistic": "sample", "quality": "measured", "stale": true,
-                "latest": ["key": "synthetic-speed", "metric": "speed_kph", "unit": "km/h", "statistic": "sample", "quality": "measured", "value": 0, "observedAt": signalTime(-1800)]])
+                "latest": ["key": "synthetic-speed", "metric": "speed_kph", "unit": "km/h", "statistic": "sample", "quality": "measured", "value": 0, "observedAt": signalTime(-1685)]])
             series.append(["metric": "speed_kph", "unit": "km/h", "source": "lubelogger", "statistic": "mean", "quality": "derived", "stale": true,
                 "latest": ["key": "synthetic-speed-mean", "metric": "speed_kph", "unit": "km/h", "statistic": "mean", "quality": "derived", "value": 34.2, "periodStart": signalTime(-4 * 86400), "periodEnd": signalTime(-3 * 86400)]])
             result["series"] = series
@@ -248,38 +248,74 @@ final class UITestProtocol: URLProtocol {
     }
 
     private static func speedHistory(from: String, to: String) -> [String: Any] {
+        let requestedStart = SignalFormat.date(from)!, requestedEnd = SignalFormat.date(to)!
+        let width = requestedEnd.timeIntervalSince(requestedStart) / 120
         func included(_ timestamp: String) -> Bool { timestamp >= from && timestamp < to }
-        var samples: [[String: Any]] = []
+        var oldSamples: [(Date, Double)] = []
         var averages: [[String: Any]] = []
         for index in 0..<2 {
             let start = signalTime(Double(-5 + index) * 86400), end = signalTime(Double(-4 + index) * 86400)
             let at = signalTime(Double(-5 + index) * 86400 + 64800)
             let value = index == 0 ? 98.0 : 0.0, mean = index == 0 ? 72.4 : 34.2
             if included(at) {
-                samples.append(["bucketStart": start, "bucketEnd": end, "windowStart": at, "windowEnd": at,
-                    "minimum": value, "maximum": value, "mean": value, "first": value, "last": value, "count": 1,
-                    "firstObservedAt": at, "lastObservedAt": at, "minimumObservedAt": at, "maximumObservedAt": at, "maxGapSeconds": 0])
+                oldSamples.append((SignalFormat.date(at)!, value))
             }
             if included(start) {
-                averages.append(["bucketStart": start, "bucketEnd": end, "windowStart": start, "windowEnd": end,
+                let bucket = min(119, max(0, Int(SignalFormat.date(end)!.timeIntervalSince(requestedStart) / width)))
+                let bucketStart = requestedStart.addingTimeInterval(Double(bucket) * width)
+                averages.append(["bucketStart": ISO8601DateFormatter().string(from: bucketStart), "bucketEnd": ISO8601DateFormatter().string(from: min(bucketStart.addingTimeInterval(width), requestedEnd)), "windowStart": start, "windowEnd": end,
                     "minimum": mean, "maximum": mean, "mean": mean, "first": mean, "last": mean, "count": 1])
             }
         }
-        var recovered: [[String: Any]] = []
+        var raw: [(Date, Double)] = []
         for index in 0..<32 {
             let offset = Double(-7200 + index * 60 + (index >= 16 ? 3600 : 0))
-            let start = signalTime(offset), last = signalTime(offset + 55), peak = signalTime(offset + 25)
-            guard included(start), included(last) else { continue }
-            let maximum = Double(30 + (index % 8) * 10), first = maximum * 0.4, end = maximum * 0.2
-            recovered.append(["bucketStart": start, "bucketEnd": signalTime(offset + 60), "windowStart": start, "windowEnd": last,
-                "minimum": end, "maximum": maximum, "mean": maximum * 0.6, "first": first, "last": end, "count": 12,
-                "firstObservedAt": start, "lastObservedAt": last, "minimumObservedAt": last, "maximumObservedAt": peak, "maxGapSeconds": 5])
+            let maximum = Double(30 + (index % 8) * 10)
+            for sample in 0..<12 {
+                let value = sample <= 5 ? maximum * (0.4 + 0.6 * Double(sample) / 5) : maximum * (1 - 0.8 * Double(sample - 5) / 6)
+                let stopped = (index == 15 || index == 31) && sample == 11
+                raw.append((SignalFormat.date(signalTime(offset + Double(sample * 5)))!, stopped ? 0 : value))
+            }
+        }
+        let samples = reducedSpeedSamples(oldSamples, from: requestedStart, to: requestedEnd, maxPoints: 120)
+        let recovered = reducedSpeedSamples(raw, from: requestedStart, to: requestedEnd, maxPoints: 120)
+        let summaryBuckets = Dictionary(grouping: averages) { $0["bucketStart"] as! String }
+        let reducedAverages = summaryBuckets.keys.sorted().map { key -> [String: Any] in
+            let periods = summaryBuckets[key]!
+            var result = periods[0]
+            let values = periods.map { $0["mean"] as! Double }
+            result["minimum"] = values.min()!; result["maximum"] = values.max()!
+            result["mean"] = values.reduce(0, +) / Double(values.count)
+            result["last"] = values.last!; result["count"] = values.count
+            result["windowStart"] = periods.map { $0["windowStart"] as! String }.min()!
+            result["windowEnd"] = periods.map { $0["windowEnd"] as! String }.max()!
+            return result
         }
         return ["metric": "speed_kph", "unit": "km/h", "from": from, "to": to, "maxPoints": 120, "series": [
             ["source": "lubelogger", "quality": "measured", "statistic": "sample", "unit": "km/h", "points": samples],
-            ["source": "lubelogger", "quality": "derived", "statistic": "mean", "unit": "km/h", "points": averages],
+            ["source": "lubelogger", "quality": "derived", "statistic": "mean", "unit": "km/h", "points": reducedAverages],
             ["source": "pi", "quality": "measured", "statistic": "sample", "unit": "km/h", "points": recovered]
         ]]
+    }
+
+    static func reducedSpeedSamples(_ samples: [(Date, Double)], from: Date, to: Date, maxPoints: Int) -> [[String: Any]] {
+        let width = to.timeIntervalSince(from) / Double(maxPoints)
+        let included = samples.filter { $0.0 >= from && $0.0 < to }.sorted { $0.0 < $1.0 }
+        let buckets = Dictionary(grouping: included) { min(maxPoints - 1, Int($0.0.timeIntervalSince(from) / width)) }
+        let formatter = ISO8601DateFormatter()
+        return buckets.keys.sorted().map { index in
+            let points = buckets[index]!, first = points.first!, last = points.last!
+            let minimum = points.reduce(first) { $1.1 < $0.1 ? $1 : $0 }
+            let maximum = points.reduce(first) { $1.1 > $0.1 ? $1 : $0 }
+            let gap = zip(points, points.dropFirst()).map { pair in pair.1.0.timeIntervalSince(pair.0.0) }.max() ?? 0
+            let bucketStart = from.addingTimeInterval(Double(index) * width)
+            return ["bucketStart": formatter.string(from: bucketStart), "bucketEnd": formatter.string(from: min(bucketStart.addingTimeInterval(width), to)),
+                "windowStart": formatter.string(from: first.0), "windowEnd": formatter.string(from: last.0),
+                "minimum": minimum.1, "maximum": maximum.1, "mean": points.map { $0.1 }.reduce(0, +) / Double(points.count),
+                "first": first.1, "last": last.1, "count": points.count,
+                "firstObservedAt": formatter.string(from: first.0), "lastObservedAt": formatter.string(from: last.0),
+                "minimumObservedAt": formatter.string(from: minimum.0), "maximumObservedAt": formatter.string(from: maximum.0), "maxGapSeconds": gap]
+        }
     }
 }
 #endif

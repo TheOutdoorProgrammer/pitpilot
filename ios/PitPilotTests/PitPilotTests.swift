@@ -5,6 +5,48 @@ import UniformTypeIdentifiers
 @testable import PitPilot
 
 final class PitPilotTests: XCTestCase {
+    func testNativeSpeedFixtureUsesRequestedReductionAndRetainsRealGapAndPeak() throws {
+        let end = try XCTUnwrap(SignalFormat.date("2026-10-09T12:00:00Z"))
+        var raw: [(Date, Double)] = []
+        for run in 0..<2 {
+            for sample in 0..<192 {
+                let offset = Double(-7200 + run * 4560 + sample * 5)
+                let value = sample == 60 ? 100.0 : sample == 0 || sample == 191 ? 0 : Double(sample % 60)
+                raw.append((end.addingTimeInterval(offset), value))
+            }
+        }
+        func history(days: Int) throws -> SignalHistory {
+            let start = end.addingTimeInterval(-Double(days) * 86400)
+            let points = UITestProtocol.reducedSpeedSamples(raw, from: start, to: end, maxPoints: 120)
+            let decoded = try JSONDecoder().decode([SignalHistoryPoint].self, from: JSONSerialization.data(withJSONObject: points))
+            return SignalHistory(metric: "speed_kph", unit: "km/h", from: ISO8601DateFormatter().string(from: start), to: ISO8601DateFormatter().string(from: end), maxPoints: 120,
+                series: [SignalHistorySeries(source: "pi", quality: "measured", statistic: "sample", points: decoded)])
+        }
+        let wide = try history(days: 30)
+        let widePoint = try XCTUnwrap(wide.series.first?.points.first)
+        XCTAssertEqual(wide.series.first?.points.count, 1)
+        XCTAssertEqual(widePoint.count, 384)
+        XCTAssertEqual(widePoint.maximum, 100)
+        XCTAssertEqual(widePoint.first, 0); XCTAssertEqual(widePoint.last, 0)
+        XCTAssertEqual(widePoint.maximumObservedAt, "2026-10-09T10:05:00Z")
+        XCTAssertEqual(widePoint.maxGapSeconds, 3605)
+        XCTAssertEqual(try XCTUnwrap(SignalFormat.date(widePoint.bucketEnd!)).timeIntervalSince(try XCTUnwrap(SignalFormat.date(widePoint.bucketStart!))), 6 * 3600)
+        let wideChart = SignalChartData(history: wide, statistic: "trend")
+        XCTAssertTrue(wideChart.vertices.contains { $0.value == 100 })
+        XCTAssertFalse(wideChart.shadesRange(wideChart.buckets[0]))
+        let close = try history(days: 1)
+        XCTAssertEqual(close.series[0].points.count, 4)
+        XCTAssertEqual(close.series[0].points.map(\.count).reduce(0, +), 384)
+        for point in close.series[0].points {
+            XCTAssertEqual(point.maxGapSeconds, 5)
+            XCTAssertEqual(try XCTUnwrap(SignalFormat.date(point.bucketEnd!)).timeIntervalSince(try XCTUnwrap(SignalFormat.date(point.bucketStart!))), 12 * 60)
+        }
+        let closeChart = SignalChartData(history: close, statistic: "trend")
+        XCTAssertEqual(Set(closeChart.vertices.map(\.segment)).count, 2)
+        XCTAssertTrue(closeChart.sparseVertices.isEmpty)
+        XCTAssertTrue(closeChart.buckets.allSatisfy { closeChart.shadesRange($0) })
+    }
+
     @MainActor
     func testOfflineUpgradeCombinesLegacyHistoryWithoutDuplicatingOrRewritingSources() throws {
         let fixture = HTTPFixture(); defer { fixture.close() }
