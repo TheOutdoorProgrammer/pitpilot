@@ -75,10 +75,15 @@ struct LatestSignals: Codable {
         }
     }
     func initialHistoryDays(_ metric: String, statistic: String, now: Date = Date()) -> Int {
-        let available = readings(metric).filter { $0.statistic == statistic }
+        let available = readings(metric).filter { statistic == "all" || $0.statistic == statistic }
         guard !available.isEmpty else { return 30 }
         let cutoff = now.addingTimeInterval(-30 * 86400)
         let cutoffDay = String(ISO8601DateFormatter().string(from: cutoff).prefix(10))
+        if statistic == "all", available.contains(where: { reading in
+            if let observed = reading.latest.referenceDate { return observed < cutoff }
+            if let day = reading.latest.calendarDate { return day < cutoffDay }
+            return false
+        }) { return 365 }
         let hasRecentValue = available.contains { reading in
             if let observed = reading.latest.referenceDate { return observed >= cutoff }
             // ISO calendar dates choose a useful range without inventing an observation time.
@@ -96,6 +101,12 @@ struct SignalHistory: Codable {
     let to: String
     let maxPoints: Int
     let series: [SignalHistorySeries]
+
+    static let trendStatistics: Set<String> = ["sample", "snapshot", "mean"]
+    func displayedSeries(_ statistic: String) -> [SignalHistorySeries] {
+        series.filter { statistic == "trend" ? Self.trendStatistics.contains($0.statistic) : $0.statistic == statistic }
+    }
+    func displayedUnit(_ statistic: String) -> String { statistic == "count" ? "count" : unit }
 }
 
 struct SignalHistorySeries: Codable, Identifiable {
@@ -103,6 +114,7 @@ struct SignalHistorySeries: Codable, Identifiable {
     let quality: String
     let statistic: String
     let points: [SignalHistoryPoint]
+    var unit: String?
     var id: String { [source, quality, statistic].joined(separator: "/") }
     var label: String { "\(SignalFormat.source(source)) · \(quality.capitalized)" }
 }
@@ -167,7 +179,8 @@ struct SignalChartBucket: Identifiable {
     let start: Double
     let end: Double
     let calendar: Bool
-    var id: String { point.id }
+    var origin: SignalHistorySeries?
+    var id: String { (origin.map { $0.id + "/" } ?? "") + point.id }
     var center: Double { (start + end) / 2 }
     var state: String {
         guard point.count > 0, [0, 1].contains(point.minimum), [0, 1].contains(point.maximum), point.minimum <= point.maximum else { return "Unknown" }
@@ -186,6 +199,8 @@ struct SignalChartVertex: Identifiable {
     let x: Double
     let value: Double
     let segment: String
+    var calendarDay = false
+    var estimated = false
 }
 
 struct SignalStateMark: Identifiable {
@@ -203,6 +218,58 @@ struct SignalChartData {
     let kind: SignalChartKind
     let statistic: String
     let valueLabels: [String: String]?
+    var sparseVertices: [SignalChartVertex] = []
+    var hasCalendarDays = false
+
+    init(history: SignalHistory, statistic: String, valueLabels: [String: String]? = nil) {
+        self.valueLabels = valueLabels
+        self.statistic = statistic
+        calendar = false
+        kind = .resolve(unit: history.displayedUnit(statistic), statistic: statistic)
+        var allBuckets: [SignalChartBucket] = []
+        var allVertices: [SignalChartVertex] = []
+        var sparse: [SignalChartVertex] = []
+        var hasDays = false
+        var extents: [(first: SignalChartVertex, last: SignalChartVertex)] = []
+        for series in history.displayedSeries(statistic) {
+            for calendar in [false, true] {
+                let layer = SignalChartData(series: series, unit: history.displayedUnit(statistic), calendar: calendar, valueLabels: valueLabels)
+                // Noon is only a drawing position within an unknown-time day, never an observation timestamp.
+                func position(_ x: Double) -> Double { calendar ? x * 86400 + 43200 : x }
+                allBuckets += layer.buckets.map { SignalChartBucket(point: $0.point, start: position($0.start), end: position($0.end), calendar: calendar, origin: series) }
+                let vertices = layer.vertices.map { SignalChartVertex(id: series.id + "/" + $0.id, x: position($0.x), value: $0.value, segment: $0.segment + "/\(calendar)", calendarDay: calendar, estimated: series.quality == "estimated") }
+                allVertices += vertices
+                if let first = vertices.first, let last = vertices.last { extents.append((first, last)) }
+                if calendar, !layer.buckets.isEmpty { hasDays = true }
+                // Dotted guides make sparse historical trends readable without shading unknown coverage.
+                if layer.kind == .trend {
+                    for pair in zip(vertices, vertices.dropFirst()) where pair.0.segment != pair.1.segment {
+                        let segment = "gap/" + pair.1.id
+                        sparse += [
+                            SignalChartVertex(id: segment + "/start", x: pair.0.x, value: pair.0.value, segment: segment),
+                            SignalChartVertex(id: segment + "/end", x: pair.1.x, value: pair.1.value, segment: segment)
+                        ]
+                    }
+                }
+            }
+        }
+        // Join nonoverlapping source eras with a guide, never join overlapping providers into a false zigzag.
+        var preceding: SignalChartVertex?
+        for extent in extents.sorted(by: { $0.first.x < $1.first.x }) {
+            if let previous = preceding, previous.x < extent.first.x, previous.estimated == extent.first.estimated {
+                let segment = "source-gap/" + extent.first.id
+                sparse += [
+                    SignalChartVertex(id: segment + "/start", x: previous.x, value: previous.value, segment: segment),
+                    SignalChartVertex(id: segment + "/end", x: extent.first.x, value: extent.first.value, segment: segment)
+                ]
+            }
+            if preceding == nil || extent.last.x > preceding!.x { preceding = extent.last }
+        }
+        buckets = allBuckets.sorted { $0.start == $1.start ? $0.id < $1.id : $0.start < $1.start }
+        vertices = allVertices.sorted { $0.x == $1.x ? $0.id < $1.id : $0.x < $1.x }
+        sparseVertices = sparse
+        hasCalendarDays = hasDays
+    }
 
     init(series: SignalHistorySeries, unit: String, calendar: Bool, maximumJoinGapSeconds: Int = 900, valueLabels: [String: String]? = nil) {
         self.valueLabels = valueLabels
@@ -262,7 +329,7 @@ struct SignalChartData {
         buckets.flatMap { bucket -> [SignalStateMark] in
             let rawLabel = kind == .state ? bucket.state : bucket.category
             let label = rawLabel == "Mixed" || rawLabel == "Unknown" ? rawLabel : SignalFormat.value(bucket.point.minimum, unit: kind == .state ? "boolean" : "code", labels: valueLabels)
-            if calendar || statistic != "sample" {
+            if bucket.calendar || (bucket.origin?.statistic ?? statistic) != "sample" {
                 return [SignalStateMark(id: bucket.id, start: bucket.center, end: bucket.center, label: label, summary: true)]
             }
             if bucket.end - bucket.start <= 900 {
@@ -286,12 +353,12 @@ struct SignalChartData {
     var xDomain: ClosedRange<Double> {
         let first = buckets.map { kind == .bars ? min($0.start, barBounds($0).lowerBound) : $0.start }.min() ?? 0
         let last = buckets.map { kind == .bars ? max($0.end, barBounds($0).upperBound) : $0.end }.max() ?? first
-        let padding = calendar ? 0.5 : max((last - first) * 0.025, 1)
+        let padding = calendar ? 0.5 : max((last - first) * 0.025, hasCalendarDays ? 43200 : 1)
         return (first - padding)...(last + padding)
     }
     func barBounds(_ bucket: SignalChartBucket) -> ClosedRange<Double> {
         let nearest = buckets.map { abs($0.center - bucket.center) }.filter { $0 > 0 }.min()
-        let period = calendar ? 1 : bucket.end - bucket.start
+        let period = calendar ? 1 : bucket.calendar ? 86400 : bucket.end - bucket.start
         let available = period > 0 ? period : nearest ?? 60
         let halfWidth = min(available, nearest ?? available) * 0.325
         return (bucket.center - halfWidth)...(bucket.center + halfWidth)
@@ -310,13 +377,15 @@ struct SignalChartData {
         if high <= low { return [low] }
         return Array(Set((0...3).map { index in
             let value = low + (high - low) * Double(index) / 3
-            return calendar ? value.rounded() : value
+            return calendar ? value.rounded() : hasCalendarDays ? floor(value / 86400) * 86400 + 43200 : value
         })).sorted()
     }
     func xLabel(_ value: Double) -> String {
         if calendar { return SignalCalendarDay.label(value) }
+        if hasCalendarDays { return SignalCalendarDay.label(floor(value / 86400)) }
         let date = Date(timeIntervalSince1970: value)
-        if xDomain.upperBound - xDomain.lowerBound < 86400 { return date.formatted(date: .omitted, time: .shortened) }
+        let observedSpan = (buckets.map(\.end).max() ?? 0) - (buckets.first?.start ?? 0)
+        if observedSpan <= 86400 { return date.formatted(date: .omitted, time: .shortened) }
         return date.formatted(.dateTime.month(.abbreviated).day())
     }
 }

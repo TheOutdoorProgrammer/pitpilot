@@ -144,7 +144,7 @@ struct VehicleCard: View {
                     if let vin = vehicle.vin, !vin.isEmpty { LabeledContent("VIN", value: vin).textSelection(.enabled).accessibilityIdentifier("vehicleInlineVIN") }
                     if let plate = vehicle.licensePlate, !plate.isEmpty { LabeledContent("License plate", value: plate).textSelection(.enabled) }
                     if let notes = vehicle.notes, !notes.isEmpty { Text(notes).textSelection(.enabled) }
-                    MetadataContent(tags: vehicle.tags, fields: vehicle.extraFields, source: vehicle.source)
+                    MetadataContent(tags: vehicle.tags, fields: vehicle.extraFields)
                 }.font(.subheadline).fixedSize(horizontal: false, vertical: true).accessibilityIdentifier("vehicleInformation")
             } else if let plate = vehicle.licensePlate, !plate.isEmpty {
                 Label(plate, systemImage: "rectangle.inset.filled").font(.caption.weight(.semibold)).foregroundStyle(.secondary)

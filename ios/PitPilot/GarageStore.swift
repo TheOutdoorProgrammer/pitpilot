@@ -44,6 +44,7 @@ struct GarageCache: Codable {
     var signals: [String: LatestSignals]?
     var signalHistory: [String: SignalHistory]?
     var locations: [String: VehicleLocationEnvelope]?
+    var hiddenDashboardMetrics: [String: Set<String>]?
 }
 
 @MainActor
@@ -53,6 +54,7 @@ final class GarageStore: ObservableObject {
     @Published private(set) var refreshing = false
     @Published private(set) var offline = false
     @Published var error: String?
+    @Published private(set) var dashboardPreferenceError: String?
     @Published private(set) var signalErrors: [String: String] = [:]
     @Published private(set) var signalsRefreshing: Set<String> = []
     @Published private(set) var locationsRefreshing: Set<String> = []
@@ -107,6 +109,24 @@ final class GarageStore: ObservableObject {
     var vehicles: [Vehicle] { cache.vehicles }
     func detail(_ id: String) -> VehicleDetail { cache.details[id] ?? VehicleDetail() }
     func signals(_ id: String) -> LatestSignals? { cache.signals?[id] }
+
+    func dashboardMetricVisible(_ metric: String, vehicleID: String) -> Bool {
+        !(cache.hiddenDashboardMetrics?[vehicleID]?.contains(metric) ?? false)
+    }
+
+    func setDashboardMetric(_ metric: String, vehicleID: String, visible: Bool) {
+        let previous = cache.hiddenDashboardMetrics
+        if cache.hiddenDashboardMetrics == nil { cache.hiddenDashboardMetrics = [:] }
+        var hidden = cache.hiddenDashboardMetrics?[vehicleID] ?? []
+        if visible { hidden.remove(metric) } else { hidden.insert(metric) }
+        cache.hiddenDashboardMetrics?[vehicleID] = hidden
+        if persist(errorMessage: nil) {
+            dashboardPreferenceError = nil
+        } else {
+            cache.hiddenDashboardMetrics = previous
+            dashboardPreferenceError = "This phone couldn't fully save your dashboard choice. The previous selection is shown for now. Please try again."
+        }
+    }
     private var client: APIClient? { disconnecting ? nil : connection.map { APIClient(connection: $0, session: session) } }
     private func isCurrent(_ client: APIClient) -> Bool {
         !disconnecting && connection?.server == client.connection.server && connection?.token == client.connection.token
@@ -169,6 +189,7 @@ final class GarageStore: ObservableObject {
             cache.details = cache.details.filter { ids.contains($0.key) }
             cache.signals = cache.signals?.filter { ids.contains($0.key) }
             cache.locations = cache.locations?.filter { ids.contains($0.key) }
+            cache.hiddenDashboardMetrics = cache.hiddenDashboardMetrics?.filter { ids.contains($0.key) }
             cache.signalHistory = cache.signalHistory?.filter { key, _ in ids.contains(String(key.split(separator: "/", maxSplits: 1).first ?? "")) }
             cache.updatedAt = Date()
             offline = false
@@ -367,6 +388,7 @@ final class GarageStore: ObservableObject {
         cache.details.removeValue(forKey: id)
         cache.signals?.removeValue(forKey: id)
         cache.locations?.removeValue(forKey: id)
+        cache.hiddenDashboardMetrics?.removeValue(forKey: id)
         cache.signalHistory = cache.signalHistory?.filter { !$0.key.hasPrefix(id + "/") }
         signalErrors.removeValue(forKey: id)
         persist()
@@ -433,7 +455,7 @@ final class GarageStore: ObservableObject {
         } catch { if isCurrent(client) { self.error = error.localizedDescription } }
     }
 
-    private func persist() {
+    @discardableResult private func persist(errorMessage: String? = "Your changes are saved on the server, but this phone couldn't cache them for offline access.") -> Bool {
         do {
             try FileManager.default.createDirectory(at: cacheURL.deletingLastPathComponent(), withIntermediateDirectories: true)
             try JSONEncoder().encode(cache).write(to: cacheURL, options: [.atomic, .completeFileProtection])
@@ -441,7 +463,11 @@ final class GarageStore: ObservableObject {
             var values = URLResourceValues()
             values.isExcludedFromBackup = true
             try excluded.setResourceValues(values)
-        } catch { self.error = "Your changes are saved on the server, but this phone couldn't cache them for offline access." }
+            return true
+        } catch {
+            if let errorMessage { self.error = errorMessage }
+            return false
+        }
     }
 }
 

@@ -89,7 +89,8 @@ final class PitPilotUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["VIN, SYNTHETIC-VIN"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["License plate, TEST-ONLY"].exists)
         XCTAssertTrue(app.staticTexts["Synthetic region"].exists)
-        XCTAssertTrue(app.staticTexts["Source record: 1"].exists)
+        XCTAssertFalse(app.staticTexts["Source record: 1"].exists)
+        XCTAssertFalse(app.staticTexts["Imported from LubeLogger"].exists)
         capture("Imported vehicle metadata", app)
         reveal(app.buttons["History"], app)
         app.buttons["History"].tap()
@@ -185,13 +186,14 @@ final class PitPilotUITests: XCTestCase {
         XCTAssertTrue(fuel.waitForExistence(timeout: 5))
         XCTAssertFalse(app.buttons["signal-rpm"].exists)
         if !fuel.isHittable { app.swipeUp() }
-        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in fuel.label.contains("daily readings") }, object: nil)], timeout: 5), .completed)
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in fuel.label.contains("all sources") }, object: nil)], timeout: 5), .completed)
         capture("Signals overview with actual values", app)
         fuel.tap()
-        XCTAssertTrue(app.descendants(matching: .any)["calendarSignalChart"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.staticTexts["Daily snapshots · gaps show missing days"].exists)
-        XCTAssertFalse(app.descendants(matching: .any)["signalHistoryChart"].exists)
-        capture("Fuel calendar-day chart", app)
+        XCTAssertTrue(app.descendants(matching: .any)["signalHistoryChart"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["One timeline · squares have day precision · dotted gaps"].exists)
+        XCTAssertFalse(app.descendants(matching: .any)["calendarSignalChart"].exists)
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@ AND label CONTAINS %@ AND label CONTAINS %@", "LubeLogger", "Smartcar", "Pi")).firstMatch.exists)
+        capture("Unified fuel chart with dense calendar and timestamped sources", app)
         XCUIDevice.shared.orientation = .landscapeLeft
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in app.frame.width > app.frame.height }, object: nil)], timeout: 5), .completed)
         app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.8)).press(forDuration: 0.1,
@@ -222,8 +224,40 @@ final class PitPilotUITests: XCTestCase {
         for _ in 0..<4 where !app.buttons["signal-fuel_level_pct"].isHittable { app.swipeUp() }
         app.buttons["signal-fuel_level_pct"].tap()
         XCTAssertTrue(app.staticTexts["Saved history on this phone"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.descendants(matching: .any)["calendarSignalChart"].exists)
+        XCTAssertTrue(app.descendants(matching: .any)["signalHistoryChart"].exists)
         capture("Offline saved fuel history", app)
+    }
+
+    func testDashboardMetricVisibilityPersistsAndCanBeRestoredOffline() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-testing", "--ui-testing-signals"]
+        app.launch()
+        connect(app)
+        app.staticTexts["Synthetic route truck"].tap()
+        reveal(app.buttons["customizeMetrics"], app)
+        app.buttons["customizeMetrics"].tap()
+        let fuel = app.switches["metric-visible-fuel_level_pct"]
+        XCTAssertTrue(fuel.waitForExistence(timeout: 5))
+        fuel.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
+        XCTAssertEqual(fuel.value as? String, "0")
+        capture("Choose dashboard metrics", app)
+        app.buttons["metricsDone"].tap()
+        XCTAssertFalse(app.buttons["signal-fuel_level_pct"].exists)
+        app.terminate()
+        app.launchArguments = ["--ui-testing", "--ui-testing-signals", "--ui-testing-preserve-cache", "--ui-testing-offline"]
+        app.launch()
+        XCTAssertTrue(app.staticTexts["Saved on this phone"].waitForExistence(timeout: 5))
+        app.staticTexts["Synthetic route truck"].tap()
+        reveal(app.buttons["customizeMetrics"], app)
+        XCTAssertFalse(app.buttons["signal-fuel_level_pct"].exists)
+        app.buttons["customizeMetrics"].tap()
+        XCTAssertTrue(fuel.waitForExistence(timeout: 5))
+        XCTAssertEqual(fuel.value as? String, "0")
+        fuel.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
+        XCTAssertEqual(fuel.value as? String, "1")
+        app.buttons["metricsDone"].tap()
+        XCTAssertTrue(app.buttons["signal-fuel_level_pct"].waitForExistence(timeout: 5))
+        capture("Hidden metric restored while offline", app)
     }
 
     func testSignalHistoryErrorAndEmptyStates() {

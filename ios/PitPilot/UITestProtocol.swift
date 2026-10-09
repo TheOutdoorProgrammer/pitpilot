@@ -169,6 +169,29 @@ final class UITestProtocol: URLProtocol {
         let unit = ["fuel_level_pct": "%", "mil_on": "boolean", "fuel_system_1_status": "code", "retained_samples": "count"][metric] ?? "kPa"
         var response: [String: Any] = ["metric": metric, "unit": unit, "from": value("from"), "to": value("to"), "maxPoints": 120, "series": []]
         if ProcessInfo.processInfo.arguments.contains("--ui-testing-history-empty") { return response }
+        if statistic == "all" {
+            let statistics = metric == "fuel_level_pct" ? ["snapshot"] : metric == "manifold_kpa" ? ["sample", "max"] : metric == "retained_samples" ? ["sum"] : ["sample"]
+            var combined: [[String: Any]] = []
+            for statistic in statistics {
+                var components = URLComponents(url: url, resolvingAgainstBaseURL: false)!
+                components.queryItems = query.filter { $0.name != "statistic" } + [URLQueryItem(name: "statistic", value: statistic)]
+                combined += signalHistory(components.url!)["series"] as? [[String: Any]] ?? []
+            }
+            if metric == "fuel_level_pct" {
+                for (index, source) in ["pi", "smartcar"].enumerated() {
+                    let start = signalTime(-48 * 86400 + Double(index * 300))
+                    let end = signalTime(-48 * 86400 + Double(index * 300 + 240))
+                    if start >= value("from"), end <= value("to") {
+                        combined.append(["source": source, "quality": "measured", "statistic": "sample", "unit": "%", "points": [[
+                            "bucketStart": start, "bucketEnd": end, "windowStart": start, "windowEnd": end,
+                            "firstObservedAt": start, "lastObservedAt": end, "minimum": 21, "maximum": 28,
+                            "mean": 24, "first": 28, "last": 21, "count": 12]]])
+                    }
+                }
+            }
+            response["series"] = combined
+            return response
+        }
         var points: [[String: Any]] = []
         if metric == "fuel_level_pct" {
             for index in 0..<94 where ![23, 24, 25, 61, 62].contains(index) {
@@ -206,7 +229,7 @@ final class UITestProtocol: URLProtocol {
         } else {
             points = [["bucketStart": signalTime(-172800), "bucketEnd": signalTime(-86400), "windowStart": signalTime(-172800), "windowEnd": signalTime(-86400), "minimum": 78, "maximum": 84, "mean": 81, "first": 78, "last": 84, "count": 2]]
         }
-        response["series"] = [["source": metric == "fuel_level_pct" ? "smartcar" : "pi", "quality": "measured", "statistic": statistic, "points": points]]
+        response["series"] = [["source": metric == "fuel_level_pct" ? "lubelogger" : "pi", "quality": "measured", "statistic": statistic, "unit": unit, "points": points]]
         return response
     }
 }
