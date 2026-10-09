@@ -142,20 +142,23 @@ func (q SignalHistoryQuery) Validate() error {
 }
 
 type SignalHistoryPoint struct {
-	BucketStart     *time.Time `json:"bucketStart,omitempty"`
-	BucketEnd       *time.Time `json:"bucketEnd,omitempty"`
-	WindowStart     *time.Time `json:"windowStart,omitempty"`
-	WindowEnd       *time.Time `json:"windowEnd,omitempty"`
-	Minimum         float64    `json:"minimum"`
-	Maximum         float64    `json:"maximum"`
-	Mean            float64    `json:"mean"`
-	First           float64    `json:"first"`
-	Last            float64    `json:"last"`
-	Count           int        `json:"count"`
-	FirstObservedAt *time.Time `json:"firstObservedAt,omitempty"`
-	LastObservedAt  *time.Time `json:"lastObservedAt,omitempty"`
-	CalendarDate    string     `json:"calendarDate,omitempty"`
-	Timezone        string     `json:"timezone,omitempty"`
+	BucketStart       *time.Time `json:"bucketStart,omitempty"`
+	BucketEnd         *time.Time `json:"bucketEnd,omitempty"`
+	WindowStart       *time.Time `json:"windowStart,omitempty"`
+	WindowEnd         *time.Time `json:"windowEnd,omitempty"`
+	Minimum           float64    `json:"minimum"`
+	Maximum           float64    `json:"maximum"`
+	Mean              float64    `json:"mean"`
+	First             float64    `json:"first"`
+	Last              float64    `json:"last"`
+	Count             int        `json:"count"`
+	FirstObservedAt   *time.Time `json:"firstObservedAt,omitempty"`
+	LastObservedAt    *time.Time `json:"lastObservedAt,omitempty"`
+	MinimumObservedAt *time.Time `json:"minimumObservedAt,omitempty"`
+	MaximumObservedAt *time.Time `json:"maximumObservedAt,omitempty"`
+	MaxGapSeconds     *float64   `json:"maxGapSeconds,omitempty"`
+	CalendarDate      string     `json:"calendarDate,omitempty"`
+	Timezone          string     `json:"timezone,omitempty"`
 }
 type SignalHistorySeries struct {
 	Source    string               `json:"source"`
@@ -259,13 +262,19 @@ func (s *Store) SignalHistory(ctx context.Context, vehicleID string, q SignalHis
 		p := groups[id][bucket]
 		if p == nil {
 			p = &SignalHistoryPoint{BucketStart: start, BucketEnd: end, Minimum: o.Value, Maximum: o.Value, First: o.Value, CalendarDate: o.CalendarDate, Timezone: o.Timezone}
+			if o.ObservedAt != nil {
+				p.MinimumObservedAt, p.MaximumObservedAt = o.ObservedAt, o.ObservedAt
+				p.MaxGapSeconds = new(float64)
+			}
 			groups[id][bucket] = p
 		}
-		if o.Value < p.Minimum {
+		if o.Value < p.Minimum || (o.Value == p.Minimum && o.ObservedAt != nil && p.MinimumObservedAt != nil && o.ObservedAt.Before(*p.MinimumObservedAt)) {
 			p.Minimum = o.Value
+			p.MinimumObservedAt = o.ObservedAt
 		}
-		if o.Value > p.Maximum {
+		if o.Value > p.Maximum || (o.Value == p.Maximum && o.ObservedAt != nil && p.MaximumObservedAt != nil && o.ObservedAt.Before(*p.MaximumObservedAt)) {
 			p.Maximum = o.Value
+			p.MaximumObservedAt = o.ObservedAt
 		}
 		p.Count++
 		p.Mean += (o.Value - p.Mean) / float64(p.Count)
@@ -273,6 +282,17 @@ func (s *Store) SignalHistory(ctx context.Context, vehicleID string, q SignalHis
 			p.Last = o.Value
 		}
 		if o.ObservedAt != nil {
+			// The index orders milliseconds. Ties may arrive out of nanosecond order,
+			// so this high-water gap conservatively overstates a gap by at most 1 ms.
+			if p.LastObservedAt != nil {
+				gap := o.ObservedAt.Sub(*p.LastObservedAt).Seconds()
+				if gap < 0 {
+					gap = -gap
+				}
+				if gap > *p.MaxGapSeconds {
+					*p.MaxGapSeconds = gap
+				}
+			}
 			if p.FirstObservedAt == nil || o.ObservedAt.Before(*p.FirstObservedAt) {
 				p.FirstObservedAt = o.ObservedAt
 				p.First = o.Value

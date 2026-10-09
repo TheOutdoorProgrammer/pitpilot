@@ -168,6 +168,9 @@ func TestSignalHistoryPreservesExtremaQualityAndCalendarPrecision(t *testing.T) 
 	if point.Minimum != 1 || point.Maximum != 99 || point.First != 50 || point.Last != 40 || point.Mean != 47.5 || point.Count != 4 {
 		t.Fatal(point)
 	}
+	if point.MinimumObservedAt == nil || !point.MinimumObservedAt.Equal(start.Add(time.Minute)) || point.MaximumObservedAt == nil || !point.MaximumObservedAt.Equal(start.Add(2*time.Minute)) || point.MaxGapSeconds == nil || *point.MaxGapSeconds != 60 {
+		t.Fatal("downsampling lost peak times or recording gaps", point)
+	}
 	snapshot := SignalObservation{Key: "day", Metric: "manifold_kpa", Unit: "kPa", Statistic: "snapshot", Quality: "measured", Value: 65, CalendarDate: "2026-06-01", Timezone: "unknown"}
 	ingestFixture(t, s, id, SignalBatch{Source: "smartcar", BatchID: "snapshot", Observations: []SignalObservation{snapshot}})
 	q.Statistic = "snapshot"
@@ -178,7 +181,7 @@ func TestSignalHistoryPreservesExtremaQualityAndCalendarPrecision(t *testing.T) 
 		t.Fatalf("calendar day omitted at midday range: %v %+v", err, history)
 	}
 	point = history.Series[0].Points[0]
-	if point.CalendarDate != "2026-06-01" || point.Timezone != "unknown" || point.BucketStart != nil || point.WindowStart != nil || point.FirstObservedAt != nil {
+	if point.CalendarDate != "2026-06-01" || point.Timezone != "unknown" || point.BucketStart != nil || point.WindowStart != nil || point.FirstObservedAt != nil || point.MinimumObservedAt != nil || point.MaximumObservedAt != nil || point.MaxGapSeconds != nil {
 		t.Fatal("calendar precision invented timestamps")
 	}
 	periodEnd := start.Add(24 * time.Hour)
@@ -316,5 +319,39 @@ func TestSignalsPreserveSubMillisecondObservationOrder(t *testing.T) {
 	p := history.Series[0].Points[0]
 	if p.First != 1 || p.Last != 2 || !p.FirstObservedAt.Before(*p.LastObservedAt) {
 		t.Fatal("history lost timestamp precision", p)
+	}
+	if p.MinimumObservedAt == nil || !p.MinimumObservedAt.Equal(*p.FirstObservedAt) || p.MaximumObservedAt == nil || !p.MaximumObservedAt.Equal(*p.LastObservedAt) || p.MaxGapSeconds == nil || *p.MaxGapSeconds < 800e-9 || *p.MaxGapSeconds >= .001 {
+		t.Fatal("submillisecond continuity metadata understated gaps or lost extrema", p)
+	}
+}
+
+func TestSignalHistoryContinuityRemainsBoundedAndSeparatesSparseBuckets(t *testing.T) {
+	s, id := signalFixture(t)
+	start := time.Date(2026, 10, 7, 10, 0, 0, 0, time.UTC)
+	batch := SignalBatch{Source: "pi", BatchID: "continuous-and-gaps"}
+	for i := range 120 {
+		batch.Observations = append(batch.Observations, signalSample(fmt.Sprintf("dense-%03d", i), float64(i%40), start.Add(time.Duration(i)*10*time.Second)))
+	}
+	batch.Observations = append(batch.Observations, signalSample("after-outage", 90, start.Add(90*time.Minute)), signalSample("second-window", 10, start.Add(2*time.Hour)))
+	ingestFixture(t, s, id, batch)
+	for _, tc := range []struct {
+		points  int
+		wantGap float64
+	}{{1, 4210}, {3, 10}} {
+		history, err := s.SignalHistory(context.Background(), id, SignalHistoryQuery{Metric: "manifold_kpa", Statistic: "sample", From: start, To: start.Add(3 * time.Hour), MaxPoints: tc.points})
+		if err != nil || len(history.Series) != 1 || len(history.Series[0].Points) > tc.points {
+			t.Fatalf("bounded history: %+v %v", history, err)
+		}
+		p := history.Series[0].Points[0]
+		if p.MaxGapSeconds == nil || *p.MaxGapSeconds != tc.wantGap {
+			t.Fatalf("maxPoints=%d gap=%v, want %v", tc.points, p.MaxGapSeconds, tc.wantGap)
+		}
+		if tc.points == 3 {
+			for _, singleton := range history.Series[0].Points[1:] {
+				if singleton.MaxGapSeconds == nil || *singleton.MaxGapSeconds != 0 || singleton.Count != 1 {
+					t.Fatal("singleton inherited another bucket's coverage", singleton)
+				}
+			}
+		}
 	}
 }
