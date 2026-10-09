@@ -24,6 +24,7 @@ permissions:
 concurrency:
   group: pitpilot-release
   cancel-in-progress: false
+  queue: max
 
 jobs:
   ios:
@@ -32,6 +33,7 @@ jobs:
     concurrency:
       group: pitpilot-ios
       cancel-in-progress: false
+      queue: max
     outputs:
       artifact-name: ${{ steps.stage.outputs.artifact-name }}
     steps:
