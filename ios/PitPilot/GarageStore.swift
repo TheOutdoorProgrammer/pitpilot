@@ -67,6 +67,7 @@ final class GarageStore: ObservableObject {
     private var signalRefreshIDs: [String: UUID] = [:]
     private var tripRevisions: [String: UUID] = [:]
     private var locationRevisions: [String: UUID] = [:]
+    private var vehicleRevisions: [String: UUID] = [:]
     private var disconnecting = false
 
     init() {
@@ -138,7 +139,7 @@ final class GarageStore: ObservableObject {
         signalRefreshIDs = [:]
         signalsRefreshing = []
         locationsRefreshing = []; locationErrors = [:]; tripsPaging = []; tripsHaveMore = [:]
-        tripRevisions = [:]; locationRevisions = [:]
+        tripRevisions = [:]; locationRevisions = [:]; vehicleRevisions = [:]
     }
 
     func refresh() async {
@@ -196,7 +197,7 @@ final class GarageStore: ObservableObject {
             persist()
         } catch is CancellationError {
             // Keep the last known connection state and cached detail intact.
-        } catch { if isCurrent(client) { offline = true; self.error = error.localizedDescription } }
+        } catch { if isCurrent(client), tripRevisions[id] == tripRevision { offline = true; self.error = error.localizedDescription } }
     }
 
     func refreshSignals(_ id: String) async {
@@ -255,7 +256,7 @@ final class GarageStore: ObservableObject {
             tripsHaveMore[id] = page.count == 50
             error = nil; persist()
         } catch is CancellationError { }
-        catch { if isCurrent(client) { error = error.localizedDescription } }
+        catch { if isCurrent(client), tripRevisions[id] == revision { error = error.localizedDescription } }
     }
 
     func deleteTrip(_ trip: Trip) async throws {
@@ -288,6 +289,7 @@ final class GarageStore: ObservableObject {
 
     func signalHistory(vehicleID: String, metric: String, statistic: String, days: Int) async throws -> SignalHistory {
         guard let client else { throw APIError.message("Connect to your server first.") }
+        let revision = vehicleRevisions[vehicleID]
         let end = Date()
         let start = end.addingTimeInterval(-Double(days) * 86400)
         let formatter = ISO8601DateFormatter()
@@ -297,7 +299,7 @@ final class GarageStore: ObservableObject {
             URLQueryItem(name: "maxPoints", value: "120")
         ])
         try Task.checkCancellation()
-        guard isCurrent(client) else { throw CancellationError() }
+        guard isCurrent(client), vehicleRevisions[vehicleID] == revision else { throw CancellationError() }
         if cache.signalHistory == nil { cache.signalHistory = [:] }
         cache.signalHistory?[historyKey(vehicleID, metric, statistic, days)] = response
         persist()
@@ -321,7 +323,7 @@ final class GarageStore: ObservableObject {
     func updateVehicle(_ id: String, values: [String: Any]) async throws {
         guard let client else { throw APIError.message("Connect to your server first.") }
         let vehicle: Vehicle = try await client.request("vehicles/\(id)", method: "PATCH", body: APIClient.body(values))
-        guard isCurrent(client) else { return }
+        guard isCurrent(client) else { throw CancellationError() }
         if let index = cache.vehicles.firstIndex(where: { $0.id == id }) { cache.vehicles[index] = vehicle }
         persist()
     }
@@ -341,8 +343,12 @@ final class GarageStore: ObservableObject {
         guard let client else { throw APIError.message("Connect to your server first.") }
         _ = try await client.send("vehicles/\(id)", method: "DELETE")
         guard isCurrent(client) else { return }
-        try await VehiclePhotoCache.shared.remove(vehicleID: id, connection: client.connection)
-        guard isCurrent(client) else { throw CancellationError() }
+        // Replies started before deletion cannot restore private history or resurrect the vehicle in the garage.
+        vehicleRevisions[id] = UUID(); tripRevisions[id] = UUID(); locationRevisions[id] = UUID()
+        signalRefreshIDs.removeValue(forKey: id)
+        signalsRefreshing.remove(id); locationsRefreshing.remove(id); tripsPaging.remove(id)
+        tripsHaveMore.removeValue(forKey: id); locationErrors.removeValue(forKey: id)
+        refreshID = nil; refreshTask?.cancel(); refreshTask = nil; refreshing = false
         cache.vehicles.removeAll { $0.id == id }
         cache.details.removeValue(forKey: id)
         cache.signals?.removeValue(forKey: id)
@@ -350,6 +356,7 @@ final class GarageStore: ObservableObject {
         cache.signalHistory = cache.signalHistory?.filter { !$0.key.hasPrefix(id + "/") }
         signalErrors.removeValue(forKey: id)
         persist()
+        try await VehiclePhotoCache.shared.remove(vehicleID: id, connection: client.connection)
     }
 
     func createRecord(vehicleID: String, values: [String: Any]) async throws {

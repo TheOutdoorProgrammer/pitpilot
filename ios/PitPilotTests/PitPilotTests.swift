@@ -5,6 +5,92 @@ import UniformTypeIdentifiers
 @testable import PitPilot
 
 final class PitPilotTests: XCTestCase {
+    func testVehicleProfilePhotoRetryDoesNotReapplyAcknowledgedOdometer() throws {
+        var live = try JSONDecoder().decode(Vehicle.self, from: Data(#"{"id":"vehicle","name":"Synthetic","make":"Example","model":"Truck","year":2020,"odometerMiles":100,"odometerStatus":"measured","vin":"VIN-A","licensePlate":"PLATE-A","createdAt":"2026-01-01T00:00:00Z"}"#.utf8))
+        var acknowledged = VehicleProfileDraft(vehicle: live)
+        var form = acknowledged
+        form.odometerMiles = 120; form.licensePlate = "PLATE-B"
+        let firstPatch = form.changes(since: acknowledged)
+        XCTAssertEqual(Set(firstPatch.keys), ["odometerMiles", "licensePlate"])
+        XCTAssertEqual(firstPatch["odometerMiles"] as? Double, 120)
+        XCTAssertFalse(form.changes(since: acknowledged).isEmpty, "A failed metadata request must remain retryable before acknowledgment")
+
+        acknowledged = form
+        live.odometerMiles = 121.75; live.odometerStatus = "estimated"; live.name = "Changed elsewhere"
+        XCTAssertFalse(form.changes(since: VehicleProfileDraft(vehicle: live)).isEmpty, "A live-cache baseline would reproduce the bug")
+        XCTAssertTrue(form.changes(since: acknowledged).isEmpty, "Photo failure and new Pi distance must not resend the already acknowledged reading")
+
+        form.vin = "VIN-B"
+        XCTAssertEqual(Set(form.changes(since: acknowledged).keys), ["vin"])
+        form.odometerMiles = 125
+        XCTAssertEqual(form.changes(since: acknowledged)["odometerMiles"] as? Double, 125, "An explicit subsequent correction must still be sent")
+    }
+
+    func testVehicleProfilePreservesUntouchedConcurrentFieldsAndSupportsClearing() throws {
+        let vehicle = try JSONDecoder().decode(Vehicle.self, from: Data(#"{"id":"vehicle","name":"Synthetic","make":"Example","model":"Truck","year":2020,"odometerMiles":100.125,"vin":"VIN-A","licensePlate":"PLATE-A","createdAt":"2026-01-01T00:00:00Z"}"#.utf8))
+        let baseline = VehicleProfileDraft(vehicle: vehicle)
+        var form = baseline
+        form.name = " Renamed "
+        form.licensePlate = "  "
+        let patch = form.changes(since: baseline)
+        XCTAssertEqual(Set(patch.keys), ["name", "licensePlate"])
+        XCTAssertEqual(patch["name"] as? String, "Renamed")
+        XCTAssertEqual(patch["licensePlate"] as? String, "")
+        XCTAssertNil(patch["odometerMiles"]); XCTAssertNil(patch["odometerStatus"]); XCTAssertNil(patch["vin"])
+        let create = form.changes(since: nil)
+        XCTAssertEqual(create["odometerMiles"] as? Double, 100.125)
+        XCTAssertEqual(create["year"] as? Int, 2020)
+        XCTAssertTrue(form.changes(since: form).isEmpty, "After creation is acknowledged, a photo retry must not resend profile fields")
+    }
+
+    @MainActor
+    func testVehicleDeletionRejectsLatePrivateHistoryAndErrorReplies() async throws {
+        for status in [200, 503] {
+            let fixture = HTTPFixture()
+            defer { fixture.close() }
+            let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+            defer { try? FileManager.default.removeItem(at: directory) }
+            let vehicle = try JSONDecoder().decode(Vehicle.self, from: Data(#"{"id":"vehicle","name":"Synthetic","make":"","model":"","year":0,"odometerMiles":0,"createdAt":"2026-01-01T00:00:00Z"}"#.utf8))
+            let trip = Trip(id: "trip", vehicleId: "vehicle", title: "Synthetic", startedAt: "2026-01-01T00:00:00Z", endedAt: "2026-01-01T00:01:00Z", distanceMiles: 1, points: [])
+            var cache = GarageCache(vehicles: [vehicle])
+            cache.details[vehicle.id] = VehicleDetail(records: [VehicleRecord(id: "record", vehicleId: vehicle.id, kind: .service, date: "2026-01-01", title: "Synthetic", notes: "", odometerMiles: 0, costCents: 0)], trips: [trip])
+            let store = GarageStore(connection: fixture.connection, cache: cache, cacheURL: directory.appendingPathComponent("garage.json"), session: fixture.session)
+            let started = expectation(description: "Pre-deletion requests started"); started.expectedFulfillmentCount = 8
+            let reported = expectation(description: "Noncancelled request telemetry completed"); reported.expectedFulfillmentCount = 8
+            fixture.configure(.hold, started: started, reported: reported)
+            let garage = Task { await store.refresh() }
+            let detail = Task { await store.refreshDetail(vehicle.id) }
+            let location = Task { await store.refreshLocation(vehicle.id) }
+            let signals = Task { await store.refreshSignals(vehicle.id) }
+            let paging = Task { await store.loadMoreTrips(vehicle.id) }
+            let history = Task { try await store.signalHistory(vehicleID: vehicle.id, metric: "rpm", statistic: "sample", days: 30) }
+            await fulfillment(of: [started], timeout: 3)
+            fixture.configure(.status(204), reported: reported)
+            try await store.deleteVehicle(vehicle.id)
+            await garage.value
+            XCTAssertFalse(store.refreshing)
+
+            fixture.replyHeld(route: "/api/v1/vehicles/vehicle/records", data: try JSONEncoder().encode(cache.details[vehicle.id]!.records))
+            fixture.replyHeld(route: "/api/v1/vehicles/vehicle/reminders")
+            // Finish the other detail children before failing trips so this tests stale errors, not sibling cancellation.
+            let detailChildrenCompleted = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in fixture.events.count >= 3 }, object: nil)
+            await fulfillment(of: [detailChildrenCompleted], timeout: 3)
+            fixture.replyHeld(route: "/api/v1/vehicles/vehicle/trips", status: status, data: try JSONEncoder().encode([trip]))
+            fixture.replyHeld(route: "/api/v1/vehicles/vehicle/location", status: status, data: Data(#"{"location":{"latitude":1,"longitude":2,"recordedAt":"2026-01-01T00:00:00Z","source":"pi-gps"}}"#.utf8))
+            fixture.replyHeld(route: "/api/v1/vehicles/vehicle/signals/latest", status: status, data: signalFixture)
+            fixture.replyHeld(route: "/api/v1/vehicles/vehicle/signals/history", status: status, data: Data(#"{"metric":"rpm","unit":"rpm","from":"2026-01-01T00:00:00Z","to":"2026-01-02T00:00:00Z","maxPoints":120,"series":[]}"#.utf8))
+            await detail.value; await location.value; await signals.value; await paging.value
+            do { _ = try await history.value; XCTFail("Deleted vehicle history must not be returned for caching") } catch { }
+            await fulfillment(of: [reported], timeout: 3)
+            XCTAssertTrue(store.vehicles.isEmpty)
+            XCTAssertNil(store.cache.details[vehicle.id]); XCTAssertNil(store.cache.locations?[vehicle.id]); XCTAssertNil(store.signals(vehicle.id))
+            XCTAssertNil(store.cachedSignalHistory(vehicleID: vehicle.id, metric: "rpm", statistic: "sample", days: 30))
+            XCTAssertFalse(store.offline); XCTAssertNil(store.error); XCTAssertNil(store.locationErrors[vehicle.id]); XCTAssertNil(store.signalErrors[vehicle.id])
+            let persisted = try JSONDecoder().decode(GarageCache.self, from: Data(contentsOf: directory.appendingPathComponent("garage.json")))
+            XCTAssertTrue(persisted.vehicles.isEmpty); XCTAssertTrue(persisted.details.isEmpty)
+        }
+    }
+
     func testVehiclePhotoNormalizationBoundsPixelsAndStripsLocationMetadata() throws {
         let format = UIGraphicsImageRendererFormat(); format.scale = 1
         let image = UIGraphicsImageRenderer(size: CGSize(width: 2400, height: 800), format: format).image { context in
@@ -897,6 +983,7 @@ private final class HTTPFixture {
     private var recordedEvents: [[String: Any]] = []
     private var recordedRequests: [URL] = []
     private var recordedHeaders: [[String: String]] = []
+    private var held: [URLProtocol] = []
     var events: [[String: Any]] { lock.lock(); defer { lock.unlock() }; return recordedEvents }
     var requests: [URL] { lock.lock(); defer { lock.unlock() }; return recordedRequests }
     var requestHeaders: [[String: String]] { lock.lock(); defer { lock.unlock() }; return recordedHeaders }
@@ -927,6 +1014,14 @@ private final class HTTPFixture {
         stopped?.fulfill()
     }
 
+    func replyHeld(route: String, status: Int = 200, data: Data = Data("[]".utf8)) {
+        lock.lock()
+        let matching = held.filter { $0.request.url?.path == route }
+        held.removeAll { $0.request.url?.path == route }
+        lock.unlock()
+        for transport in matching { respond(transport, status: status, data: data) }
+    }
+
     func receive(_ transport: URLProtocol) {
         lock.lock()
         let response = self.response
@@ -952,12 +1047,12 @@ private final class HTTPFixture {
             reported?.fulfill()
             return
         }
-        started?.fulfill()
+        defer { started?.fulfill() }
         if let url = transport.request.url {
             lock.lock(); recordedRequests.append(url); recordedHeaders.append(transport.request.allHTTPHeaderFields ?? [:]); lock.unlock()
         }
         switch response {
-        case .hold: break
+        case .hold: lock.lock(); held.append(transport); lock.unlock()
         case .success: respond(transport, status: 200)
         case .status(let code): respond(transport, status: code)
         case .json(let data): respond(transport, status: 200, data: data)

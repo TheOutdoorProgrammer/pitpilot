@@ -34,6 +34,7 @@ struct AddVehicleView: View {
     @State private var photoRequest = UUID()
     @State private var initialized = false
     @State private var savedVehicleID: String?
+    @State private var acknowledgedProfile: VehicleProfileDraft?
     @State private var working = false
     @State private var error: String?
     private var parsedYear: Int? { year.isEmpty ? 0 : Int(year) }
@@ -82,6 +83,7 @@ struct AddVehicleView: View {
                     guard !initialized else { return }
                     initialized = true
                     if let vehicle {
+                        acknowledgedProfile = VehicleProfileDraft(vehicle: vehicle)
                         name = vehicle.name; make = vehicle.make; model = vehicle.model
                         year = vehicle.year == 0 ? "" : String(vehicle.year)
                         mileage = String(vehicle.odometerMiles)
@@ -106,25 +108,21 @@ struct AddVehicleView: View {
     }
     private func save() {
         guard valid, let year = parsedYear, let miles = Input.number(mileage) else { return }
+        let submitted = VehicleProfileDraft(name: name, make: make, model: model, year: year, odometerMiles: miles,
+                                            odometerStatus: odometerStatus, vin: vin, licensePlate: licensePlate)
+        let body = submitted.changes(since: acknowledgedProfile)
+        let targetID = savedVehicleID ?? vehicle?.id
         working = true
         Task {
             do {
-                let vehicle = originalVehicle
-                var body: [String: Any] = [:]
-                let cleanName = name.trimmingCharacters(in: .whitespaces)
-                if vehicle?.name != cleanName { body["name"] = cleanName }
-                if vehicle?.make != make { body["make"] = make }
-                if vehicle?.model != model { body["model"] = model }
-                if vehicle?.year != year { body["year"] = year }
-                if vehicle?.odometerMiles != miles { body["odometerMiles"] = miles }
-                if (vehicle?.odometerStatus ?? "unknown") != odometerStatus { body["odometerStatus"] = odometerStatus }
-                let cleanVIN = vin.trimmingCharacters(in: .whitespacesAndNewlines)
-                let cleanPlate = licensePlate.trimmingCharacters(in: .whitespacesAndNewlines)
-                if (vehicle?.vin ?? "") != cleanVIN { body["vin"] = cleanVIN }
-                if (vehicle?.licensePlate ?? "") != cleanPlate { body["licensePlate"] = cleanPlate }
-                if let vehicle { savedVehicleID = vehicle.id; if !body.isEmpty { try await store.updateVehicle(vehicle.id, values: body) } }
+                if let id = targetID {
+                    if !body.isEmpty { try await store.updateVehicle(id, values: body) }
+                    savedVehicleID = id
+                }
                 else { savedVehicleID = (try await store.createVehicle(body)).id }
-                if let id = vehicle?.id ?? savedVehicleID, photoData != nil || removePhoto {
+                // Only acknowledged form values advance this baseline. Live telemetry and other editors must not turn a photo retry into a mileage correction.
+                acknowledgedProfile = submitted
+                if let id = savedVehicleID, photoData != nil || removePhoto {
                     do { try await store.updateVehiclePhoto(id, jpeg: removePhoto ? nil : photoData) }
                     catch { throw APIError.message("Vehicle details were saved, but the photo could not be saved. \(error.localizedDescription)") }
                 }
