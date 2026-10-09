@@ -229,7 +229,7 @@ final class GarageStore: ObservableObject {
         guard !locationsRefreshing.contains(id), let client else { return }
         let revision = locationRevisions[id]
         locationsRefreshing.insert(id)
-        defer { locationsRefreshing.remove(id) }
+        defer { if locationRevisions[id] == revision { locationsRefreshing.remove(id) } }
         do {
             let response: VehicleLocationEnvelope = try await client.request("vehicles/\(id)/location")
             try Task.checkCancellation()
@@ -264,10 +264,13 @@ final class GarageStore: ObservableObject {
         _ = try await client.send("trips/\(trip.id)", method: "DELETE")
         guard isCurrent(client) else { throw CancellationError() }
         tripRevisions[trip.vehicleId] = UUID()
-        locationRevisions[trip.vehicleId] = UUID()
         cache.details[trip.vehicleId]?.trips.removeAll { $0.id == trip.id }
-        if trip.source == "pi-gps" { cache.locations?.removeValue(forKey: trip.vehicleId) }
+        if trip.source == "pi-gps" { invalidateNativeGPSCache(trip.vehicleId) }
         persist()
+        if trip.source == "pi-gps" {
+            await refreshLocation(trip.vehicleId)
+            await refreshSignals(trip.vehicleId)
+        }
     }
 
     func clearLocationHistory(_ vehicleID: String) async throws {
@@ -275,12 +278,23 @@ final class GarageStore: ObservableObject {
         _ = try await client.send("vehicles/\(vehicleID)/location-history", method: "DELETE")
         guard isCurrent(client) else { throw CancellationError() }
         tripRevisions[vehicleID] = UUID()
-        locationRevisions[vehicleID] = UUID()
-        cache.locations?.removeValue(forKey: vehicleID)
-        locationErrors.removeValue(forKey: vehicleID)
+        invalidateNativeGPSCache(vehicleID)
         cache.details[vehicleID]?.trips.removeAll { $0.source == "pi-gps" }
         persist()
         await refreshDetail(vehicleID)
+        await refreshLocation(vehicleID)
+        await refreshSignals(vehicleID)
+    }
+
+    private func invalidateNativeGPSCache(_ vehicleID: String) {
+        locationRevisions[vehicleID] = UUID()
+        locationsRefreshing.remove(vehicleID)
+        locationErrors.removeValue(forKey: vehicleID)
+        signalRefreshIDs.removeValue(forKey: vehicleID)
+        signalsRefreshing.remove(vehicleID)
+        if cache.locations?[vehicleID]?.location?.source == "pi-gps" { cache.locations?.removeValue(forKey: vehicleID) }
+        // Collection details also retain coordinates. Drop native GPS copies until re-read, including replies already in flight.
+        cache.signals?[vehicleID]?.contexts?.removeAll { $0.source == "pi" && $0.context.location?.type == "gps" }
     }
 
     func cachedSignalHistory(vehicleID: String, metric: String, statistic: String, days: Int) -> SignalHistory? {

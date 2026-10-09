@@ -5,6 +5,73 @@ import UniformTypeIdentifiers
 @testable import PitPilot
 
 final class PitPilotTests: XCTestCase {
+    @MainActor
+    func testGPSHistoryDeletionRefreshesSmartcarFallbackAndRejectsStaleCoordinates() async throws {
+        let fixture = HTTPFixture(); defer { fixture.close() }
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let piLocation = Data(#"{"location":{"latitude":1,"longitude":2,"recordedAt":"2026-01-02T00:00:00Z","source":"pi-gps"}}"#.utf8)
+        let smartcarLocation = Data(#"{"location":{"latitude":3,"longitude":4,"recordedAt":"2026-01-01T00:00:00Z","source":"smartcar"}}"#.utf8)
+        var signals = try JSONDecoder().decode(LatestSignals.self, from: signalFixture)
+        signals.contexts = try JSONDecoder().decode([SourcedSignalContext].self, from: Data(#"[{"source":"pi","context":{"key":"native","kind":"location","observedAt":"2026-01-02T00:00:00Z","location":{"latitude":1,"longitude":2,"type":"gps"}}},{"source":"smartcar","context":{"key":"connected","kind":"location","observedAt":"2026-01-01T00:00:00Z","location":{"latitude":3,"longitude":4,"type":"gps"}}}]"#.utf8))
+        let staleSignals = try JSONEncoder().encode(signals)
+        var expectedSignals = signals
+        expectedSignals.contexts?.removeAll { $0.source == "pi" }
+        var cache = GarageCache()
+        cache.locations = ["vehicle": try JSONDecoder().decode(VehicleLocationEnvelope.self, from: piLocation)]
+        cache.signals = ["vehicle": signals]
+        let store = GarageStore(connection: fixture.connection, cache: cache, cacheURL: directory.appendingPathComponent("garage.json"), session: fixture.session)
+        let started = expectation(description: "Old coordinate requests held"); started.expectedFulfillmentCount = 2
+        let reported = expectation(description: "GPS deletion and refresh telemetry completed"); reported.expectedFulfillmentCount = 8
+        fixture.configure(.hold, started: started, reported: reported)
+        let oldLocation = Task { await store.refreshLocation("vehicle") }
+        let oldSignals = Task { await store.refreshSignals("vehicle") }
+        await fulfillment(of: [started], timeout: 3)
+        fixture.configure(.routes([
+            "/api/v1/vehicles/vehicle/location-history": Data(),
+            "/api/v1/vehicles/vehicle/records": Data("[]".utf8),
+            "/api/v1/vehicles/vehicle/reminders": Data("[]".utf8),
+            "/api/v1/vehicles/vehicle/trips": Data("[]".utf8),
+            "/api/v1/vehicles/vehicle/location": smartcarLocation,
+            "/api/v1/vehicles/vehicle/signals/latest": try JSONEncoder().encode(expectedSignals)
+        ]), reported: reported)
+        try await store.clearLocationHistory("vehicle")
+        fixture.replyHeld(route: "/api/v1/vehicles/vehicle/location", data: piLocation)
+        fixture.replyHeld(route: "/api/v1/vehicles/vehicle/signals/latest", data: staleSignals)
+        await oldLocation.value; await oldSignals.value
+        await fulfillment(of: [reported], timeout: 3)
+        XCTAssertEqual(store.cache.locations?["vehicle"]?.location?.source, "smartcar")
+        XCTAssertEqual(store.signals("vehicle")?.contexts?.map(\.source), ["smartcar"])
+        XCTAssertFalse(store.offline)
+        let saved = try JSONDecoder().decode(GarageCache.self, from: Data(contentsOf: directory.appendingPathComponent("garage.json")))
+        XCTAssertEqual(saved.locations?["vehicle"]?.location?.source, "smartcar")
+        XCTAssertEqual(saved.signals?["vehicle"]?.contexts?.map(\.source), ["smartcar"])
+    }
+
+    @MainActor
+    func testDeletingPiTripKeepsSmartcarPositionWhenRefreshFails() async throws {
+        let fixture = HTTPFixture(); defer { fixture.close() }
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let location = VehicleLocationEnvelope(location: VehicleLocation(latitude: 3, longitude: 4, recordedAt: "2026-01-01T00:00:00Z", source: "smartcar"))
+        var trip = Trip(id: "trip", vehicleId: "vehicle", title: "Synthetic", startedAt: "2026-01-01T00:00:00Z", endedAt: "2026-01-01T00:01:00Z", distanceMiles: 1, points: [])
+        trip.source = "pi-gps"
+        var signals = try JSONDecoder().decode(LatestSignals.self, from: signalFixture)
+        signals.contexts = try JSONDecoder().decode([SourcedSignalContext].self, from: Data(#"[{"source":"pi","context":{"key":"native","kind":"location","observedAt":"2026-01-01T00:00:00Z","location":{"latitude":1,"longitude":2,"type":"gps"}}},{"source":"smartcar","context":{"key":"connected","kind":"location","observedAt":"2026-01-01T00:00:00Z","location":{"latitude":3,"longitude":4,"type":"gps"}}}]"#.utf8))
+        var cache = GarageCache(); cache.locations = ["vehicle": location]; cache.signals = ["vehicle": signals]
+        cache.details["vehicle"] = VehicleDetail(trips: [trip])
+        let store = GarageStore(connection: fixture.connection, cache: cache, cacheURL: directory.appendingPathComponent("garage.json"), session: fixture.session)
+        let reported = expectation(description: "Trip deletion and failed refreshes reported"); reported.expectedFulfillmentCount = 3
+        fixture.configure(.routes(["/api/v1/trips/trip": Data()]), reported: reported)
+        try await store.deleteTrip(trip)
+        await fulfillment(of: [reported], timeout: 3)
+        XCTAssertTrue(store.detail("vehicle").trips.isEmpty)
+        XCTAssertEqual(store.cache.locations?["vehicle"]?.location?.source, "smartcar")
+        XCTAssertEqual(store.signals("vehicle")?.contexts?.map(\.source), ["smartcar"])
+        XCTAssertNotNil(store.locationErrors["vehicle"]); XCTAssertNotNil(store.signalErrors["vehicle"])
+        XCTAssertFalse(store.offline)
+    }
+
     func testVehicleProfilePhotoRetryDoesNotReapplyAcknowledgedOdometer() throws {
         var live = try JSONDecoder().decode(Vehicle.self, from: Data(#"{"id":"vehicle","name":"Synthetic","make":"Example","model":"Truck","year":2020,"odometerMiles":100,"odometerStatus":"measured","vin":"VIN-A","licensePlate":"PLATE-A","createdAt":"2026-01-01T00:00:00Z"}"#.utf8))
         var acknowledged = VehicleProfileDraft(vehicle: live)
