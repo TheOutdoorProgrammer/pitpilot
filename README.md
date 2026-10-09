@@ -14,6 +14,8 @@ Opt-in USB GPS collection records actual fixes, queues them offline and derives 
 
 [LubeLogger migration](docs/lubelogger-migration.md) previews changes and applies them atomically, with duplicate prevention and conflict reporting. Supported source data and import blockers are documented in the migration guide.
 
+[Receiver recovery](docs/receiver-recovery.md) imports actual timestamped OBD readings from a closed legacy receiver backup. It preserves raw events, reconciles exact native Pi overlaps and archives unknown-clock events without inventing timestamps.
+
 The iOS app stores its access token in Keychain and caches records, private photos and loaded measurement history for offline reading. It does not queue offline changes. Install [0.5.1, build 24 through Fledge](https://fledge.theoutdoorprogrammer.com/a/com.theoutdoorprogrammer.pitpilot/a4574bf26336) on a device included in the provisioning profile. The [release history](https://github.com/TheOutdoorProgrammer/pitpilot/releases) and [feature checklist](FEATURES.md) track publication and verified behavior; apps older than 0.2.0 cannot read the imported record categories.
 
 The release includes the cancellation fix from 0.1.1. New refreshes replace older work, while genuine transport failures report a bounded diagnostic category through the authenticated telemetry relay.

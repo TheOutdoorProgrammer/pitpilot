@@ -9,7 +9,6 @@ import (
 	randv2 "math/rand/v2"
 	"os"
 	"path/filepath"
-	"sort"
 	"sync"
 	"time"
 
@@ -242,37 +241,7 @@ func collect(ctx context.Context, c Config, q *Queue, state *runtimeState, open 
 }
 
 func Batch(sample obd.Observation, at time.Time, id string) (garage.SignalBatch, error) {
-	b := garage.SignalBatch{Source: "pi", BatchID: id}
-	if len(sample.Readings) == 0 && sample.DTCs == nil && sample.PendingDTCs == nil && sample.PermanentDTCs == nil {
-		return b, errors.New("empty adapter observation")
-	}
-	units := map[string]string{}
-	for _, d := range garage.SignalDefinitions() {
-		units[d.Metric] = d.Unit
-	}
-	keys := make([]string, 0, len(sample.Readings))
-	for k := range sample.Readings {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	for _, k := range keys {
-		o := garage.SignalObservation{Key: id + ":" + k, Metric: k, Unit: units[k], Statistic: "sample", Quality: "measured", Value: sample.Readings[k], ObservedAt: &at}
-		if err := o.Validate(); err != nil {
-			return b, err
-		}
-		b.Observations = append(b.Observations, o)
-	}
-	for _, d := range []struct {
-		class string
-		codes []string
-	}{{"stored", sample.DTCs}, {"pending", sample.PendingDTCs}, {"permanent", sample.PermanentDTCs}} {
-		reads := 1
-		if d.codes == nil {
-			reads = 0
-		}
-		b.Contexts = append(b.Contexts, garage.SignalContext{Key: id + ":" + d.class, Kind: "diagnostic", ObservedAt: &at, Diagnostic: &garage.SignalDiagnostic{Class: d.class, SuccessfulReads: reads, Unknown: d.codes == nil, Codes: d.codes}})
-	}
-	return b, b.Validate()
+	return garage.MeasuredOBDBatch(sample.Readings, sample.DTCs, sample.PendingDTCs, sample.PermanentDTCs, at, id)
 }
 func upload(ctx context.Context, q *Queue, c *Client, state *runtimeState) {
 	delay := time.Second

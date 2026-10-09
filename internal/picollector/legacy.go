@@ -4,11 +4,11 @@ import (
 	"context"
 	"errors"
 	"log/slog"
-	"regexp"
 	"time"
 
 	"github.com/TheOutdoorProgrammer/pitpilot/internal/picollector/diag"
 	obd "github.com/TheOutdoorProgrammer/pitpilot/internal/picollector/obd"
+	"github.com/TheOutdoorProgrammer/pitpilot/internal/receiverhistory"
 )
 
 type LegacyConfig struct {
@@ -17,50 +17,9 @@ type LegacyConfig struct {
 	TokenFile string `json:"tokenFile"`
 }
 
-var legacyIdentifier = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$`)
-var legacyDTC = regexp.MustCompile(`^[PBCU][0-3][0-9A-F]{3}$`)
+var legacyIdentifier = receiverhistory.Identifier
 
-type LegacyEvent struct {
-	SchemaVersion int                `json:"schema_version"`
-	ID            string             `json:"id"`
-	DeviceID      string             `json:"device_id"`
-	BootID        string             `json:"boot_id"`
-	Sequence      uint64             `json:"sequence"`
-	UptimeMS      int64              `json:"uptime_ms"`
-	ObservedAt    *time.Time         `json:"observed_at"`
-	Readings      map[string]float64 `json:"readings"`
-	DTCs          []string           `json:"dtcs"`
-	PendingDTCs   []string           `json:"pending_dtcs,omitzero"`
-	PermanentDTCs []string           `json:"permanent_dtcs,omitzero"`
-}
-
-func (e LegacyEvent) Validate() error {
-	if e.SchemaVersion != 1 || !legacyIdentifier.MatchString(e.ID) || !legacyIdentifier.MatchString(e.DeviceID) || !legacyIdentifier.MatchString(e.BootID) || e.Sequence == 0 || e.UptimeMS < 0 {
-		return errors.New("invalid legacy event identity")
-	}
-	if e.ObservedAt != nil && (e.ObservedAt.Year() < 2020 || e.ObservedAt.Year() > 2100 || e.ObservedAt.After(time.Now().Add(5*time.Minute))) {
-		return errors.New("invalid legacy observation time")
-	}
-	if len(e.Readings) == 0 && e.DTCs == nil && e.PendingDTCs == nil && e.PermanentDTCs == nil {
-		return errors.New("empty legacy observation")
-	}
-	for name, value := range e.Readings {
-		if !obd.ValidLegacyReading(name, value) {
-			return errors.New("invalid legacy reading")
-		}
-	}
-	for _, codes := range [][]string{e.DTCs, e.PendingDTCs, e.PermanentDTCs} {
-		if len(codes) > 127 {
-			return errors.New("oversized legacy diagnostics")
-		}
-		for _, code := range codes {
-			if !legacyDTC.MatchString(code) {
-				return errors.New("invalid legacy diagnostic")
-			}
-		}
-	}
-	return nil
-}
+type LegacyEvent = receiverhistory.Event
 
 func legacyEvent(c *LegacyConfig, sample obd.Observation, at time.Time, id, boot string, uptime int64) *LegacyEvent {
 	if c == nil {

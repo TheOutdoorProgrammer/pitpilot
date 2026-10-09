@@ -10,6 +10,8 @@ import (
 )
 
 func (s *Server) registerMigration(register func(string, http.HandlerFunc)) {
+	register("POST /api/v1/migrations/receiver/preview", s.recoverReceiver(false))
+	register("POST /api/v1/migrations/receiver/apply", s.recoverReceiver(true))
 	register("POST /api/v1/migrations/summary-metrics/preview", s.convertSummaries(false))
 	register("POST /api/v1/migrations/summary-metrics/apply", s.convertSummaries(true))
 	register("POST /api/v1/migrations/lubelogger/preview", s.migrateLubeLogger(false))

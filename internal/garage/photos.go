@@ -24,11 +24,24 @@ type VehiclePhoto struct {
 }
 
 func initializeVehiclePhotos(db *sql.DB) error {
-	_, err := db.Exec(`BEGIN;
-	CREATE TABLE IF NOT EXISTS vehicle_photos(vehicle_id TEXT PRIMARY KEY REFERENCES vehicles(id) ON DELETE CASCADE, revision TEXT NOT NULL, data BLOB NOT NULL);
-	PRAGMA user_version=6;
-	COMMIT;`)
-	return err
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err = tx.Exec(`CREATE TABLE IF NOT EXISTS vehicle_photos(vehicle_id TEXT PRIMARY KEY REFERENCES vehicles(id) ON DELETE CASCADE, revision TEXT NOT NULL, data BLOB NOT NULL)`); err != nil {
+		return err
+	}
+	var version int
+	if err = tx.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
+		return err
+	}
+	if version < 6 {
+		if _, err = tx.Exec("PRAGMA user_version=6"); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 func normalizeVehiclePhoto(data []byte) ([]byte, error) {
