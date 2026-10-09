@@ -52,6 +52,16 @@ For an existing vehicle, stop the old reader first, preserve its binary/configur
 
 Rollback stops the native reader first and preserves its state directory, then restores the old reader. `picollector drain --config /etc/pitpilot/collector.json`, run as the collector account while its service is stopped, finishes retained native deliveries without opening the adapter. Neither rollback path resets sequence numbers or restores an older queue snapshot over newly collected data. Live handoff and physical power-loss behavior require deployment acceptance; unit fixtures do not prove those operations happened.
 
+### Existing Sonoma installation
+
+The ARM64 Sonoma helpers reuse the installed Bluetooth binding, private receiver token and device-restricted telemetry environment. They preserve `/etc/sonoma`, NetworkManager profiles, hotspot/VPN policy and software-poweroff masks. Do not remove `/etc/sonoma`: networking and Bluetooth still read files there.
+
+After verifying the release signature and binary digest in a trusted environment, stage the binary, this checkout's `scripts/` and `deploy/picollector/` directories, and a private enrollment-token file on the Pi. Run `picollector-sonoma-prepare.sh VERIFIED_BINARY SHA256 ENROLLMENT_TOKEN_FILE SERVER_URL` as root. It installs and enrolls without stopping the old collector. It is a one-time preparation, not a retry command: if enrollment fails, inspect the installed identity and enrollment state before retrying enrollment alone. Revoke an enrollment with a lost response before creating another.
+
+Run `picollector-sonoma-handoff.sh start` as root from a detached systemd service. It stops the old reader, takes a private consistent backup, drains the existing queue through its original upload-only command, and starts the native reader. A ten-minute systemd recovery timer resumes the old reader unless the operator accepts the cutover. Both readers conflict at the systemd level. Before acceptance, a reboot starts the still-enabled old reader.
+
+Verify fresh PitPilot observations, device heartbeats, successful delivery to the retained receiver, and correlated telemetry. Then run `/opt/pitpilot/picollector/handoff accept`: it enables the native reader and automatic updater, archives and masks only the old collector unit, and cancels recovery. The old executable, live queue and private backup remain available for rollback. `/opt/pitpilot/picollector/handoff rollback` stops native collection and restores the old unit without overwriting either queue. Pending native deliveries must be drained separately before eventual cleanup.
+
 ## Signed automatic updates
 
 Release manifests are `picollector_linux_arm64.update.json` and `picollector_linux_amd64.update.json`. Each wraps base64 payload bytes and an Ed25519 signature. The embedded release public key authenticates the exact payload, including platform, stable semantic version, monotonic sequence, immutable release URL, SHA-256, size and expiry. Sequence is `major * 10^12 + minor * 10^6 + patch`, with each component below one million. Unsigned development snapshots cannot be installed automatically.
