@@ -69,6 +69,7 @@ func NewWithOptions(store *garage.Store, token string, logger *slog.Logger, opti
 	s.registerSignals(register)
 	s.registerDevices(mux, register)
 	s.registerSmartcar(register)
+	s.registerPhotos(mux, register)
 	if options.MetricsToken != "" {
 		if len(options.MetricsToken) < 32 || options.MetricsToken == token || strings.ContainsAny(options.MetricsToken, " \t\r\n\x00") {
 			return nil, errors.New("metrics token must be distinct and contain at least 32 bytes")
@@ -80,6 +81,10 @@ func NewWithOptions(store *garage.Store, token string, logger *slog.Logger, opti
 }
 
 func (s *Server) authenticate(next http.HandlerFunc) http.Handler {
+	return s.authenticateContentType(next, "application/json")
+}
+
+func (s *Server) authenticateContentType(next http.HandlerFunc, contentType string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
@@ -90,8 +95,8 @@ func (s *Server) authenticate(next http.HandlerFunc) http.Handler {
 			fail(w, 401, "authentication required")
 			return
 		}
-		if r.Method != "GET" && r.Method != "DELETE" && strings.Split(r.Header.Get("Content-Type"), ";")[0] != "application/json" {
-			fail(w, 415, "Content-Type must be application/json")
+		if r.Method != "GET" && r.Method != "DELETE" && strings.Split(r.Header.Get("Content-Type"), ";")[0] != contentType {
+			fail(w, 415, "Content-Type must be "+contentType)
 			return
 		}
 		next(w, r)
@@ -161,6 +166,10 @@ func (s *Server) createVehicle(w http.ResponseWriter, r *http.Request) {
 	}
 	if v.Source != nil {
 		fail(w, 422, "source is managed by the importer")
+		return
+	}
+	if v.PhotoRevision != "" {
+		fail(w, 422, "photo revision is managed by photo uploads")
 		return
 	}
 	v.ID = garage.NewID()

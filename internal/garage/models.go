@@ -19,6 +19,7 @@ type Vehicle struct {
 	CreatedAt                 time.Time    `json:"createdAt"`
 	VIN                       string       `json:"vin,omitempty"`
 	LicensePlate              string       `json:"licensePlate,omitempty"`
+	PhotoRevision             string       `json:"photoRevision,omitempty"`
 	Notes                     string       `json:"notes,omitempty"`
 	Tags                      []string     `json:"tags,omitempty"`
 	ExtraFields               []ExtraField `json:"extraFields,omitempty"`

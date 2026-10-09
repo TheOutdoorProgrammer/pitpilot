@@ -48,7 +48,7 @@ func Open(filename string) (*Store, error) {
 		db.Close()
 		return nil, err
 	}
-	if version > 5 {
+	if version > 6 {
 		db.Close()
 		return nil, errors.New("database schema is newer than this server")
 	}
@@ -97,6 +97,10 @@ func Open(filename string) (*Store, error) {
 		return nil, err
 	}
 	if err = initializeOdometers(db); err != nil {
+		db.Close()
+		return nil, err
+	}
+	if err = initializeVehiclePhotos(db); err != nil {
 		db.Close()
 		return nil, err
 	}
@@ -361,6 +365,7 @@ type Export struct {
 	SignalBatches        []StoredSignalBatch   `json:"signalBatches"`
 	ConvertedSignalNotes []ConvertedSignalNote `json:"convertedSignalNotes"`
 	OdometerBaselines    []OdometerBaseline    `json:"odometerBaselines,omitempty"`
+	VehiclePhotos        []VehiclePhoto        `json:"vehiclePhotos,omitempty"`
 }
 
 type ImportSettings struct {
@@ -463,6 +468,9 @@ func (s *Store) Export(ctx context.Context) (out Export, err error) {
 		return out, err
 	}
 	if out.OdometerBaselines, err = exportOdometerBaselines(ctx, tx); err != nil {
+		return out, err
+	}
+	if out.VehiclePhotos, err = exportVehiclePhotos(ctx, tx); err != nil {
 		return out, err
 	}
 	return out, tx.Commit()

@@ -33,8 +33,14 @@ func initializeOdometers(db *sql.DB) error {
 	if err = seedOdometers(context.Background(), tx); err != nil {
 		return err
 	}
-	if _, err = tx.Exec("PRAGMA user_version=5"); err != nil {
+	var version int
+	if err = tx.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
 		return err
+	}
+	if version < 5 {
+		if _, err = tx.Exec("PRAGMA user_version=5"); err != nil {
+			return err
+		}
 	}
 	return tx.Commit()
 }

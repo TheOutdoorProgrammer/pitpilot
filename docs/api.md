@@ -2,12 +2,13 @@
 
 All `/api/v1` requests require `Authorization: Bearer <household-token>`. Use HTTPS. Keep the token in the iOS Keychain or an integration's secret store. Tokens are not user accounts: a token grants access to the entire household. Rotate the deployment secret and restart the server to revoke it.
 
-Requests with bodies use `Content-Type: application/json`. Responses are JSON, except successful deletes (`204`). Create returns `201` with the saved resource. Errors use `{"error":"message"}` and an appropriate HTTP status. Unknown fields, multiple JSON documents, invalid units, negative costs, and bodies above 4 MiB are rejected. Client-supplied IDs on creation are replaced by server-generated IDs.
+Requests with bodies use `Content-Type: application/json`, except vehicle photo uploads described below. Responses are JSON, except photo downloads and successful resource deletes (`204`). Create returns `201` with the saved resource. Errors use `{"error":"message"}` and an appropriate HTTP status. Unknown fields, multiple JSON documents, invalid units, negative costs, and JSON bodies above 4 MiB are rejected. Client-supplied IDs on creation are replaced by server-generated IDs.
 
 | Method | Path | Result |
 | --- | --- | --- |
 | GET, POST | `/api/v1/vehicles` | List or create vehicles |
 | GET, PATCH, DELETE | `/api/v1/vehicles/{id}` | Read, edit, or delete a vehicle and its records |
+| GET, PUT, DELETE | `/api/v1/vehicles/{id}/photo` | Download, replace, or remove the private vehicle photo |
 | GET, POST | `/api/v1/vehicles/{id}/records` | List or create records |
 | PATCH, DELETE | `/api/v1/records/{id}` | Edit or delete a record |
 | GET, POST | `/api/v1/vehicles/{id}/reminders` | List or create reminders |
@@ -22,6 +23,8 @@ Requests with bodies use `Content-Type: application/json`. Responses are JSON, e
 List responses are arrays. Missing resources return `404`; an existing resource with no children returns `[]`. Lists currently return the full household history. Pagination and idempotency keys are not implemented; clients must not automatically retry create requests after an ambiguous network failure.
 
 ## Resource fields
+
+Vehicle photos use authenticated raw `image/jpeg` PUT requests, limited to 2 MiB and 1600 pixels per side. Invalid images return `422`; oversized requests return `413`. The server decodes and re-encodes every image, removing embedded EXIF location metadata and trailing content. PUT and DELETE return the updated vehicle (`200`); DELETE is idempotent for an existing vehicle. The server-owned `photoRevision` content hash is present only when a photo exists. GET returns JPEG bytes with an ETag and `Cache-Control: no-store`; a missing photo returns `404`. These endpoints use the household token, never a public asset URL or collector token. SQLite backups and the JSON export's `vehiclePhotos` collection include photo bytes. JSON encodes those bytes as base64. Deleting the vehicle also deletes its photo.
 
 All IDs are opaque strings. Mileage is explicitly in miles, liquid volume in US gallons, and costs are integer cents. Currency conversion and multiple currencies are not implemented. Calendar dates use `YYYY-MM-DD`; instants use RFC 3339 with a timezone. Text titles and names are required and limited to 200 UTF-8 bytes.
 
