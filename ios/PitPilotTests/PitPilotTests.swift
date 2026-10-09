@@ -504,6 +504,38 @@ final class PitPilotTests: XCTestCase {
         XCTAssertNil(oldDefinition.description); XCTAssertNil(oldDefinition.interpretation); XCTAssertNil(oldDefinition.valueLabels)
     }
 
+    func testVehicleLocationKindsPreserveProviderMeaningAndOldCacheCompatibility() throws {
+        let decoder = JSONDecoder()
+        let parked = try decoder.decode(VehicleLocation.self, from: Data(#"{"latitude":0,"longitude":0,"recordedAt":"2026-01-01T00:00:00Z","source":"smartcar","locationType":"LAST_PARKED"}"#.utf8))
+        XCTAssertEqual(parked.sourceLabel, "Smartcar")
+        XCTAssertEqual(parked.kindLabel, "Last parked")
+        XCTAssertTrue(parked.locationExplanation.contains("last parked"))
+        XCTAssertEqual(parked.latitude, 0)
+        XCTAssertEqual(parked.longitude, 0)
+        let cached = try decoder.decode(VehicleLocation.self, from: JSONEncoder().encode(parked))
+        XCTAssertEqual(cached.locationType, "LAST_PARKED")
+        XCTAssertEqual(cached.recordedAt, parked.recordedAt)
+
+        var current = parked
+        current.locationType = "CURRENT"
+        XCTAssertEqual(current.kindLabel, "Reported position")
+        XCTAssertTrue(current.locationExplanation.contains("not live tracking"))
+        current.locationType = "future-provider-kind"
+        XCTAssertEqual(current.kindLabel, "Recorded location")
+        XCTAssertFalse(current.locationExplanation.contains("last parked"))
+
+        let old = try decoder.decode(VehicleLocation.self, from: Data(#"{"latitude":1,"longitude":2,"recordedAt":"2026-01-01T00:00:00Z","source":"pi-gps"}"#.utf8))
+        XCTAssertNil(old.locationType)
+        XCTAssertEqual(old.sourceLabel, "Pi GPS")
+        XCTAssertEqual(old.kindLabel, "Recorded location")
+        var gps = old
+        gps.locationType = "gps"
+        XCTAssertEqual(gps.kindLabel, "GPS fix")
+        let nullKind = try decoder.decode(VehicleLocation.self, from: Data(#"{"latitude":1,"longitude":2,"recordedAt":"2026-01-01T00:00:00Z","source":"smartcar","locationType":null}"#.utf8))
+        XCTAssertNil(nullKind.locationType)
+        XCTAssertEqual(nullKind.kindLabel, "Recorded location")
+    }
+
     @MainActor
     func testTripPagingUsesStableCursorAndDeduplicatesExistingTrips() async throws {
         let fixture = HTTPFixture(); defer { fixture.close() }

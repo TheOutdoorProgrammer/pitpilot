@@ -2,6 +2,8 @@
 
 PitPilot connects compatible vehicles through Smartcar and stores timestamped observations directly in its signal history. The iOS app handles consent and vehicle selection. The Go backend keeps credentials private and reconciles data periodically, so opening the app does not wake the vehicle or consume an API request.
 
+Smartcar locations also update the vehicle's last-known map pin without requiring a Pi or any trips. The map identifies Smartcar as the source and preserves the OEM observation time and `CURRENT` or `LAST_PARKED` location type when supplied. A missing or unavailable update leaves the last valid position visible with its original timestamp. Smartcar positions do not create trip routes; Pi-equipped vehicles retain their independent GPS maps and recorded trips. See the [location contract](gps.md).
+
 This integration uses Smartcar V3 application credentials. An application access token expires after one hour; there are no per-vehicle refresh tokens. Requests for signals carry the connected user's `sc-user-id`. See [Smartcar API authentication](https://smartcar.com/docs/getting-started/how-to/api-authentication).
 
 ## Configure the server

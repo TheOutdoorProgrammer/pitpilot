@@ -469,9 +469,45 @@ final class PitPilotUITests: XCTestCase {
         app.buttons["garageMenu"].tap()
         app.buttons["clearGPSHistory"].tap()
         app.sheets["Delete GPS location history?"].buttons["Delete saved GPS history"].firstMatch.tap()
-        reveal(app.staticTexts["No GPS fix recorded yet"], app)
+        reveal(app.staticTexts["No location reported yet"], app)
         XCTAssertFalse(app.staticTexts["Synthetic park loop"].exists)
         capture("Deleted GPS location history", app)
+    }
+
+    func testSmartcarParkedMapWithoutTripsAndSeparatePiRoutes() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-testing", "--ui-testing-cockpit", "--ui-testing-smartcar-location"]
+        app.launch(); connect(app)
+        app.staticTexts["Synthetic connected car"].tap()
+        reveal(app.buttons["Trips"], app); app.buttons["Trips"].tap()
+        let location = app.buttons["vehicleLocationMap"]
+        reveal(location, app)
+        XCTAssertTrue(app.staticTexts["Smartcar · Last parked"].exists)
+        XCTAssertFalse(app.staticTexts["Synthetic park loop"].exists)
+        capture("Smartcar last parked location without a Pi", app)
+        location.tap()
+        XCTAssertTrue(app.navigationBars["Vehicle location"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Smartcar · Last parked"].exists)
+        XCTAssertTrue(app.staticTexts["Smartcar reported where the vehicle last parked. It may have moved since then."].exists)
+        capture("Expanded Smartcar parked map", app)
+        app.buttons["Done"].tap()
+        reveal(app.staticTexts["No recorded trips yet"], app)
+        XCTAssertFalse(app.staticTexts["Synthetic park loop"].exists)
+        capture("Smartcar location with separate empty trip history", app)
+
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        XCTAssertTrue(app.staticTexts["Synthetic route truck"].waitForExistence(timeout: 5))
+        app.staticTexts["Synthetic route truck"].tap()
+        reveal(app.buttons["Trips"], app); app.buttons["Trips"].tap()
+        reveal(app.buttons["vehicleLocationMap"], app)
+        XCTAssertTrue(app.staticTexts["Pi GPS · GPS fix"].exists)
+        XCTAssertFalse(app.staticTexts["Smartcar · Last parked"].exists)
+        reveal(app.staticTexts["Synthetic park loop"], app)
+        app.staticTexts["Synthetic park loop"].tap()
+        XCTAssertTrue(app.staticTexts["4 recorded location samples"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Recorded trip route")).firstMatch.exists)
+        XCTAssertTrue(app.staticTexts["Estimated from GPS fixes. Separate from the odometer."].exists)
+        capture("Pi trip route remains separate from Smartcar vehicle", app)
     }
 
     private func reveal(_ element: XCUIElement, _ app: XCUIApplication) {

@@ -8,8 +8,9 @@ final class UITestProtocol: URLProtocol {
     private static let migration = ProcessInfo.processInfo.arguments.contains("--ui-testing-migration")
     private static let signals = ProcessInfo.processInfo.arguments.contains("--ui-testing-signals")
     private static let cockpit = ProcessInfo.processInfo.arguments.contains("--ui-testing-cockpit")
+    private static let smartcarLocation = ProcessInfo.processInfo.arguments.contains("--ui-testing-smartcar-location")
     static var vehicles: [[String: Any]] = {
-        guard populated || migration || signals || cockpit || ProcessInfo.processInfo.arguments.contains("--ui-testing-integrations") else { return [] }
+        guard populated || migration || signals || cockpit || smartcarLocation || ProcessInfo.processInfo.arguments.contains("--ui-testing-integrations") else { return [] }
         var vehicle: [String: Any] = ["id": "test-vehicle", "name": "Synthetic route truck", "make": "", "model": "", "year": 2002, "odometerMiles": 120000, "createdAt": "2026-01-01T00:00:00Z"]
         if migration {
             vehicle["vin"] = "SYNTHETIC-VIN"
@@ -19,6 +20,9 @@ final class UITestProtocol: URLProtocol {
             vehicle["source"] = ["system": "lubelogger", "instance": "synthetic", "collection": "vehicles", "id": "1"]
         }
         if cockpit { vehicle["photoRevision"] = "synthetic-photo"; vehicle["vin"] = "SYNTHETIC-VIN"; vehicle["licensePlate"] = "TEST-ONLY" }
+        if smartcarLocation {
+            return [vehicle, ["id": "smartcar-vehicle", "name": "Synthetic connected car", "make": "", "model": "", "year": 2019, "odometerMiles": 45000, "createdAt": "2026-01-01T00:00:00Z"]]
+        }
         return [vehicle]
     }()
     static var records: [[String: Any]] = migration ? [
@@ -47,7 +51,7 @@ final class UITestProtocol: URLProtocol {
             ["latitude": 40.7733, "longitude": -73.9726, "recordedAt": "2026-01-01T12:03:00Z"]
         ]
     ]] : []
-    static var location: [String: Any]? = cockpit ? ["latitude": 40.7733, "longitude": -73.9726, "recordedAt": "2026-01-01T12:03:00Z", "source": "pi-gps", "accuracyMeters": 8] : nil
+    static var location: [String: Any]? = cockpit ? ["latitude": 40.7733, "longitude": -73.9726, "recordedAt": "2026-01-01T12:03:00Z", "source": "pi-gps", "locationType": "gps", "accuracyMeters": 8] : nil
     override class func canInit(with request: URLRequest) -> Bool { request.url?.host == "pitpilot.test" }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func startLoading() {
@@ -71,6 +75,10 @@ final class UITestProtocol: URLProtocol {
         }
         if request.value(forHTTPHeaderField: "Authorization") != "Bearer test-token" { code = 401; response = ["error": "Unauthorized"] }
         else if route == "/api/v1/client-events" { code = 204 }
+        else if route == "/api/v1/vehicles/smartcar-vehicle/location", Self.smartcarLocation {
+            response = ["location": ["latitude": 40.774, "longitude": -73.973, "recordedAt": "2026-01-01T14:00:00Z", "source": "smartcar", "locationType": "LAST_PARKED"]]
+        }
+        else if Self.smartcarLocation, ["/api/v1/vehicles/smartcar-vehicle/trips", "/api/v1/vehicles/smartcar-vehicle/records", "/api/v1/vehicles/smartcar-vehicle/reminders"].contains(route) { response = [] }
         else if route == "/api/v1/vehicles/test-vehicle/photo", !Self.vehicles.isEmpty {
             if request.httpMethod == "DELETE" { Self.vehicles[0].removeValue(forKey: "photoRevision"); response = Self.vehicles[0] }
             else if request.httpMethod == "PUT" { Self.vehicles[0]["photoRevision"] = "synthetic-updated-photo"; response = Self.vehicles[0] }

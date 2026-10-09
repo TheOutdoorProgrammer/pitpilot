@@ -154,7 +154,7 @@ struct VehicleDetailView: View {
             VehicleLocationView(vehicleID: vehicle.id)
             Text("Miles with a memory").font(.title3.weight(.bold))
             if detail.trips.isEmpty {
-                ContentUnavailableView("No recorded trips yet", systemImage: "map", description: Text("Enable Record GPS trips for your Pi and connect a supported USB GPS receiver. Routes appear after valid fixes arrive. This app does not track your phone's location."))
+                ContentUnavailableView("No recorded trips yet", systemImage: "map", description: Text("Smartcar locations appear on the map above. Trip routes need a Pi with GPS and Record GPS trips enabled. This app does not track your phone's location."))
             }
             ForEach(detail.trips.sorted(by: Trip.newestFirst)) { trip in
                 NavigationLink { TripView(trip: trip) } label: {

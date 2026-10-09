@@ -126,6 +126,6 @@ func (s *Service) process(parent context.Context, v garage.SmartcarConnection) {
 			s.logger.ErrorContext(ctx, "smartcar synchronization persistence failed")
 		}
 	}
-	span.SetAttributes(attribute.String("smartcar.state", v.Status.State), attribute.Int("smartcar.observations", len(result.Batch.Observations)), attribute.Int("smartcar.unavailable_signals", result.Unavailable))
-	s.logger.InfoContext(ctx, "smartcar synchronization completed", "state", v.Status.State, "observations", len(result.Batch.Observations), "unavailable_signals", result.Unavailable)
+	span.SetAttributes(attribute.String("smartcar.state", v.Status.State), attribute.Int("smartcar.observations", len(result.Batch.Observations)), attribute.Int("smartcar.locations", len(result.Batch.Contexts)), attribute.Int("smartcar.unavailable_signals", result.Unavailable))
+	s.logger.InfoContext(ctx, "smartcar synchronization completed", "state", v.Status.State, "observations", len(result.Batch.Observations), "locations", len(result.Batch.Contexts), "unavailable_signals", result.Unavailable)
 }

@@ -19,6 +19,7 @@ type RecordedLocation struct {
 	Longitude      float64   `json:"longitude"`
 	RecordedAt     time.Time `json:"recordedAt"`
 	Source         string    `json:"source"`
+	LocationType   string    `json:"locationType,omitempty"`
 	AccuracyMeters *float64  `json:"accuracyMeters,omitempty"`
 	SpeedKPH       *float64  `json:"speedKph,omitempty"`
 	CourseDegrees  *float64  `json:"courseDegrees,omitempty"`
@@ -255,7 +256,7 @@ func (s *Store) LatestLocation(ctx context.Context, vehicleID string) (out *Reco
 			source = "pi-gps"
 		}
 		v := c.Location
-		out = &RecordedLocation{Latitude: v.Latitude, Longitude: v.Longitude, RecordedAt: *c.ObservedAt, Source: source, AccuracyMeters: v.AccuracyMeters, SpeedKPH: v.SpeedKPH, CourseDegrees: v.CourseDegrees, AltitudeMeters: v.AltitudeMeters, Satellites: v.Satellites, HDOP: v.HDOP, FixQuality: v.FixQuality}
+		out = &RecordedLocation{Latitude: v.Latitude, Longitude: v.Longitude, RecordedAt: *c.ObservedAt, Source: source, LocationType: v.Type, AccuracyMeters: v.AccuracyMeters, SpeedKPH: v.SpeedKPH, CourseDegrees: v.CourseDegrees, AltitudeMeters: v.AltitudeMeters, Satellites: v.Satellites, HDOP: v.HDOP, FixQuality: v.FixQuality}
 	}
 	return out, rows.Err()
 }

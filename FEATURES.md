@@ -48,6 +48,7 @@ Connection recovery: [v0.1.1](https://github.com/TheOutdoorProgrammer/pitpilot/r
 - [x] Derive current mileage from actual readings and subsequent immutable Pi distance increments; handle retries, corrections and reordered uploads.
 - [x] Capture validated USB GPS fixes independently of OBD polling and queue them durably for offline upload.
 - [x] Derive automatic trips with explicit recording gaps and show previous routes and actual last-known vehicle location.
+- [x] Show Smartcar last-known locations without a Pi or trip history, with provider timestamps and parked-position labels, alongside other vehicles' Pi GPS routes.
 - [x] Offer Pi recording controls, trip deletion and location-history deletion that delayed uploads cannot undo.
 - [x] Refresh changed generated LubeLogger summaries explicitly, preserving previous source documents and measurements in versioned archives.
 - [x] Verify these new native journeys on the self-hosted runner and publish the signed release.

@@ -11,6 +11,40 @@ import (
 	"github.com/TheOutdoorProgrammer/pitpilot/internal/garage"
 )
 
+func TestSmartcarLocationWithoutCollectorOrTrip(t *testing.T) {
+	s, h := fixture(t)
+	v := vehicle(t, h)
+	ctx := context.Background()
+	at := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
+	batch := garage.SignalBatch{Source: "smartcar", BatchID: "parked-location", Contexts: []garage.SignalContext{{Key: "parked", Kind: "location", ObservedAt: &at, Location: &garage.SignalLocation{Latitude: 0, Longitude: 0, Type: "LAST_PARKED"}}}}
+	if _, err := s.IngestSignals(ctx, v.ID, batch); err != nil {
+		t.Fatal(err)
+	}
+	base := "/api/v1/vehicles/" + v.ID
+	for _, clear := range []bool{false, true} {
+		if clear {
+			if w := request(h, "DELETE", base+"/location-history", ""); w.Code != 204 {
+				t.Fatal("GPS clear failed", w.Code)
+			}
+		}
+		w := request(h, "GET", base+"/location", "")
+		var response struct {
+			Location *garage.RecordedLocation `json:"location"`
+		}
+		if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &response) != nil || response.Location == nil {
+			t.Fatal("Smartcar-only map has no location", w.Code)
+		}
+		loc := response.Location
+		if loc.Source != "smartcar" || loc.LocationType != "LAST_PARKED" || !loc.RecordedAt.Equal(at) || loc.Latitude != 0 || loc.Longitude != 0 || loc.Satellites != nil {
+			t.Fatalf("lost location provenance: %+v", loc)
+		}
+		w = request(h, "GET", base+"/trips", "")
+		if w.Code != 200 || strings.TrimSpace(w.Body.String()) != `[]` {
+			t.Fatal("Smartcar-only vehicle acquired trips")
+		}
+	}
+}
+
 func TestGPSConfigNegotiationPreservesOldUpdaterContract(t *testing.T) {
 	s, h := fixture(t)
 	v := vehicle(t, h)
