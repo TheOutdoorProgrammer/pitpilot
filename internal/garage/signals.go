@@ -20,6 +20,8 @@ type SignalDefinition struct {
 	Label             string `json:"label"`
 	Unit              string `json:"unit"`
 	StaleAfterSeconds int    `json:"staleAfterSeconds"`
+	Description       string `json:"description,omitempty"`
+	Interpretation    string `json:"interpretation,omitempty"`
 }
 
 type SignalObservation struct {
@@ -297,6 +299,7 @@ var signalDefinitions = func() map[string]SignalDefinition {
 				d.Label = fmt.Sprintf("Oxygen sensor %d fuel trim", n)
 			}
 		}
+		d.Description, d.Interpretation = explainSignal(metric)
 		definitions[metric] = d
 	}
 	return definitions

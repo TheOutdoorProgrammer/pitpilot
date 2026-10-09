@@ -70,6 +70,12 @@ Point Grafana at the collector's metrics datasource. The endpoint follows [OpenM
 
 This endpoint contains private vehicle measurements. It is separate from PitPilot's operational OpenTelemetry logs and traces and does not automatically send vehicle data to an external monitoring service. Protect the scrape credential and the collector's stored data as household data. Never embed either API credential in an app binary.
 
+## Metric explanations
+
+The signal catalog supplies a plain-language `description` and `interpretation` for every supported metric. Native metric details display these alongside the existing source, quality and timing information. Explanations distinguish measurements from commands, state codes from quantities, and absolute pressure from gauge or manifold-relative pressure. They do not apply a universal healthy range across different engines.
+
+The OBD channel identities and pressure references follow the existing collector decoders and [DashLogic's PID reference](https://www.dashlogic.com/docs/technical/obdii_pids). Fuel-trim wording was checked against [Snap-on's fuel trim explanation](https://www.snapon.com/EN/UK/Diagnostics/News-Centre/Technical-Focus-Archive/fuel-trim-adaptation); readiness completion is distinct from diagnosis in [Snap-on's vehicle communication guide](https://www.snapon.com/Files/Diagnostics/UserManuals/AsianImportVehicleCommunicationSoftwareManual_EAZ0025B02H.pdf). Oil life means estimated service life, as described by [Smartcar](https://smartcar.com/blog/introducing-the-engine-oil-life-api-production), rather than oil level.
+
 ## Convert generated notes
 
 Back up the database first. The converter recognizes complete generated OBD driving summaries and Smartcar status notes imported from LubeLogger. Notes with unrecognized text or metadata remain visible. Conversion retains the full original record as protected evidence and stores structured observations and contexts in the same transaction that removes the visible note.
