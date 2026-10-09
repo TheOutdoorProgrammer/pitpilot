@@ -56,7 +56,10 @@ struct AddVehicleView: View {
                         Label(loadingPhoto ? "Preparing photo…" : "Choose photo", systemImage: "photo.on.rectangle")
                     }.disabled(working || loadingPhoto).accessibilityIdentifier("chooseVehiclePhoto")
                     if photoData != nil || (originalVehicle?.photoRevision != nil && !removePhoto) {
-                        Button("Remove photo", role: .destructive) { photoData = nil; selectedPhoto = nil; removePhoto = true }
+                        Button("Remove photo", role: .destructive) {
+                            photoRequest = UUID(); loadingPhoto = false
+                            photoData = nil; selectedPhoto = nil; removePhoto = true
+                        }
                     }
                     Text("Location and camera metadata are removed before upload.").font(.footnote).foregroundStyle(.secondary)
                 }
@@ -72,7 +75,7 @@ struct AddVehicleView: View {
                     }
                 }
                 if let error { Text(error).foregroundStyle(.red) }
-            }.navigationTitle(vehicle == nil ? "Add vehicle" : "Edit vehicle").navigationBarTitleDisplayMode(.inline)
+            }.disabled(working).navigationTitle(vehicle == nil ? "Add vehicle" : "Edit vehicle").navigationBarTitleDisplayMode(.inline)
                 .toolbar { EntryToolbar(working: working, valid: valid, cancel: { dismiss() }, save: save) }
                 .interactiveDismissDisabled(working)
                 .onAppear {

@@ -103,6 +103,40 @@ final class PitPilotTests: XCTestCase {
         XCTAssertEqual(APIClient.operation(route: "vehicles/private-id/location-history", method: "DELETE"), "vehicle.location.delete")
     }
 
+    func testAuthenticatedPhotoCacheIsPartitionedAndInvalidated() async throws {
+        let first = HTTPFixture(), second = HTTPFixture()
+        defer { first.close(); second.close() }
+        var vehicle = try JSONDecoder().decode(Vehicle.self, from: Data(#"{"id":"synthetic-photo-vehicle","name":"Synthetic","make":"","model":"","year":0,"odometerMiles":0,"createdAt":"2026-01-01T00:00:00Z"}"#.utf8))
+        vehicle.photoRevision = "synthetic-revision"
+        let cache = VehiclePhotoCache()
+        let jpeg = try XCTUnwrap(UIGraphicsImageRenderer(size: CGSize(width: 10, height: 10)).image { context in
+            UIColor.orange.setFill(); context.fill(CGRect(x: 0, y: 0, width: 10, height: 10))
+        }.jpegData(compressionQuality: 0.8))
+        let firstReported = expectation(description: "First photo telemetry"); firstReported.expectedFulfillmentCount = 2
+        let secondReported = expectation(description: "Other connection photo telemetry")
+        first.configure(.json(jpeg), reported: firstReported); second.configure(.json(jpeg), reported: secondReported)
+        do {
+            let downloaded = try await cache.image(vehicle: vehicle, client: first.client)
+            let saved = try await cache.image(vehicle: vehicle, client: first.client)
+            XCTAssertEqual(downloaded, jpeg); XCTAssertEqual(saved, jpeg)
+            XCTAssertEqual(first.requests.count, 1)
+            _ = try await cache.image(vehicle: vehicle, client: second.client)
+            XCTAssertEqual(second.requests.count, 1)
+            try await cache.remove(vehicleID: vehicle.id, connection: first.connection)
+            _ = try await cache.image(vehicle: vehicle, client: first.client)
+            XCTAssertEqual(first.requests.count, 2)
+            await fulfillment(of: [firstReported, secondReported], timeout: 2)
+            XCTAssertEqual(first.requestHeaders.first?["Authorization"], "Bearer synthetic-test-token")
+            XCTAssertEqual(first.requestHeaders.first?["Accept"], "image/jpeg")
+        } catch {
+            try? await cache.remove(vehicleID: vehicle.id, connection: first.connection)
+            try? await cache.remove(vehicleID: vehicle.id, connection: second.connection)
+            throw error
+        }
+        try await cache.remove(vehicleID: vehicle.id, connection: first.connection)
+        try await cache.remove(vehicleID: vehicle.id, connection: second.connection)
+    }
+
     func testHistoryUsesCaptureTimeAcrossOffsetsAndKeepsUnknownPrecision() throws {
         var a = VehicleRecord(id: "a", vehicleId: "v", kind: .odometer, date: "2026-10-08", title: "Z actual", notes: "", odometerMiles: 101, costCents: 0)
         a.recordedAt = "2026-10-08T23:30:00-04:00"
@@ -849,8 +883,10 @@ private final class HTTPFixture {
     private var stopped: XCTestExpectation?
     private var recordedEvents: [[String: Any]] = []
     private var recordedRequests: [URL] = []
+    private var recordedHeaders: [[String: String]] = []
     var events: [[String: Any]] { lock.lock(); defer { lock.unlock() }; return recordedEvents }
     var requests: [URL] { lock.lock(); defer { lock.unlock() }; return recordedRequests }
+    var requestHeaders: [[String: String]] { lock.lock(); defer { lock.unlock() }; return recordedHeaders }
 
     init() {
         connection = Connection(server: URL(string: "https://\(UUID().uuidString.lowercased()).example.test")!, token: "synthetic-test-token")
@@ -904,7 +940,9 @@ private final class HTTPFixture {
             return
         }
         started?.fulfill()
-        if let url = transport.request.url { lock.lock(); recordedRequests.append(url); lock.unlock() }
+        if let url = transport.request.url {
+            lock.lock(); recordedRequests.append(url); recordedHeaders.append(transport.request.allHTTPHeaderFields ?? [:]); lock.unlock()
+        }
         switch response {
         case .hold: break
         case .success: respond(transport, status: 200)
