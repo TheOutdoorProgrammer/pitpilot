@@ -38,7 +38,11 @@ func initializeAutomaticTrips(db *sql.DB) error {
 }
 
 func isGPS(c SignalContext) bool {
-	return c.Kind == "location" && c.Location != nil && c.Location.Type == "gps" && c.ObservedAt != nil
+	return c.Kind == "location" && c.Location != nil && c.Location.Type == "gps" && c.ObservedAt != nil && c.Location.RecordingID != "" && c.Location.HDOP != nil && c.Location.FixQuality != nil && c.Location.Satellites != nil
+}
+
+func (v SignalLocation) hasNativeGPSMetadata() bool {
+	return v.RecordingID != "" || v.FixQuality != nil || v.Satellites != nil || v.HDOP != nil || v.SpeedKPH != nil || v.CourseDegrees != nil || v.AltitudeMeters != nil
 }
 
 func gpsExcluded(ctx context.Context, tx *sql.Tx, vehicleID string, c SignalContext) (bool, error) {
@@ -217,20 +221,43 @@ func GPSDistanceMeters(a, b Point) float64 {
 func (s *Store) LatestLocation(ctx context.Context, vehicleID string) (out *RecordedLocation, err error) {
 	ctx, done := operation(ctx, "db.gps.location")
 	defer func() { done(err) }()
-	var raw []byte
-	err = s.db.QueryRowContext(ctx, `SELECT data FROM signal_contexts WHERE vehicle_id=? AND source='pi' AND kind='location' AND json_extract(data,'$.location.type')='gps' AND json_extract(data,'$.location.recordingId') IS NOT NULL AND json_extract(data,'$.observedAt') IS NOT NULL AND sort_time<=? ORDER BY sort_time DESC,key LIMIT 1`, vehicleID, time.Now().UnixMilli()).Scan(&raw)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, nil
-	}
+	// Location type existed before native recording metadata. Smartcar keeps its
+	// authentic OEM timestamp and type; neither calendar days nor period bounds
+	// can establish an actual last-known measurement time.
+	rows, err := s.db.QueryContext(ctx, `WITH candidates AS (
+		SELECT source,key,sort_time,data FROM signal_contexts
+		WHERE vehicle_id=? AND kind='location' AND source IN ('pi','smartcar')
+		AND json_extract(data,'$.observedAt') IS NOT NULL AND sort_time<=?
+		AND (source='smartcar' OR (json_extract(data,'$.location.type')='gps'
+		AND json_extract(data,'$.location.recordingId') IS NOT NULL
+		AND json_extract(data,'$.location.hdop') IS NOT NULL
+		AND json_extract(data,'$.location.fixQuality') IS NOT NULL
+		AND json_extract(data,'$.location.satellites') IS NOT NULL)))
+		SELECT source,data FROM candidates WHERE sort_time=(SELECT MAX(sort_time) FROM candidates) ORDER BY source,key`, vehicleID, time.Now().UnixMilli())
 	if err != nil {
 		return nil, err
 	}
-	var c SignalContext
-	if err = json.Unmarshal(raw, &c); err != nil {
-		return nil, err
+	defer rows.Close()
+	for rows.Next() {
+		var raw []byte
+		var source string
+		if err = rows.Scan(&source, &raw); err != nil {
+			return nil, err
+		}
+		var c SignalContext
+		if err = json.Unmarshal(raw, &c); err != nil {
+			return nil, err
+		}
+		if c.ObservedAt == nil || c.Location == nil || (out != nil && !c.ObservedAt.After(out.RecordedAt)) {
+			continue
+		}
+		if source == "pi" {
+			source = "pi-gps"
+		}
+		v := c.Location
+		out = &RecordedLocation{Latitude: v.Latitude, Longitude: v.Longitude, RecordedAt: *c.ObservedAt, Source: source, AccuracyMeters: v.AccuracyMeters, SpeedKPH: v.SpeedKPH, CourseDegrees: v.CourseDegrees, AltitudeMeters: v.AltitudeMeters, Satellites: v.Satellites, HDOP: v.HDOP, FixQuality: v.FixQuality}
 	}
-	v := c.Location
-	return &RecordedLocation{Latitude: v.Latitude, Longitude: v.Longitude, RecordedAt: *c.ObservedAt, Source: "pi-gps", AccuracyMeters: v.AccuracyMeters, SpeedKPH: v.SpeedKPH, CourseDegrees: v.CourseDegrees, AltitudeMeters: v.AltitudeMeters, Satellites: v.Satellites, HDOP: v.HDOP, FixQuality: v.FixQuality}, nil
+	return out, rows.Err()
 }
 
 func (s *Store) ClearGPSHistory(ctx context.Context, vehicleID string) (err error) {
@@ -242,14 +269,14 @@ func (s *Store) ClearGPSHistory(ctx context.Context, vehicleID string) (err erro
 	}
 	defer tx.Rollback()
 	var latest int64
-	if err = tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(sort_time),0) FROM signal_contexts WHERE vehicle_id=? AND source='pi' AND kind='location' AND json_extract(data,'$.location.type')='gps'`, vehicleID).Scan(&latest); err != nil {
+	if err = tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(sort_time),0) FROM signal_contexts WHERE vehicle_id=? AND source='pi' AND kind='location' AND json_extract(data,'$.location.type')='gps' AND json_extract(data,'$.location.recordingId') IS NOT NULL`, vehicleID).Scan(&latest); err != nil {
 		return err
 	}
 	cutoff := max(time.Now().UnixMilli(), latest)
 	if _, err = tx.ExecContext(ctx, `INSERT INTO gps_history_policy(vehicle_id,deleted_before) VALUES(?,?) ON CONFLICT(vehicle_id) DO UPDATE SET deleted_before=MAX(deleted_before,excluded.deleted_before)`, vehicleID, cutoff); err != nil {
 		return err
 	}
-	if _, err = tx.ExecContext(ctx, `DELETE FROM signal_contexts WHERE vehicle_id=? AND source='pi' AND kind='location' AND json_extract(data,'$.location.type')='gps'`, vehicleID); err != nil {
+	if _, err = tx.ExecContext(ctx, `DELETE FROM signal_contexts WHERE vehicle_id=? AND source='pi' AND kind='location' AND json_extract(data,'$.location.type')='gps' AND json_extract(data,'$.location.recordingId') IS NOT NULL`, vehicleID); err != nil {
 		return err
 	}
 	if _, err = tx.ExecContext(ctx, `DELETE FROM automatic_trips WHERE vehicle_id=?`, vehicleID); err != nil {

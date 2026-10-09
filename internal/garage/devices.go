@@ -387,7 +387,7 @@ func (s *Store) IngestDeviceSignals(ctx context.Context, token string, batch Sig
 	}
 	for i := range batch.Contexts {
 		batch.Contexts[i].Key = key(batch.Contexts[i].Key)
-		if location := batch.Contexts[i].Location; location != nil && location.Type == "gps" {
+		if location := batch.Contexts[i].Location; location != nil && location.Type == "gps" && location.RecordingID != "" {
 			location.RecordingID = key(location.RecordingID)
 		}
 	}

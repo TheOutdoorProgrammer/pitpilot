@@ -519,7 +519,7 @@ func (c SignalContext) Validate() error {
 		if v.AccuracyMeters != nil && !bounded(*v.AccuracyMeters, 1e7) {
 			return errors.New("invalid location accuracy")
 		}
-		if v.Type == "gps" {
+		if v.Type == "gps" && v.hasNativeGPSMetadata() {
 			if c.ObservedAt != nil && c.ObservedAt.After(time.Now().Add(time.Minute)) {
 				return errors.New("GPS observation is in the future")
 			}
@@ -529,7 +529,7 @@ func (c SignalContext) Validate() error {
 			if v.SpeedKPH != nil && !bounded(*v.SpeedKPH, 400) || v.CourseDegrees != nil && (!bounded(*v.CourseDegrees, 360) || *v.CourseDegrees == 360) || v.AltitudeMeters != nil && (!finiteSignal(*v.AltitudeMeters) || *v.AltitudeMeters < -1000 || *v.AltitudeMeters > 20000) {
 				return errors.New("invalid GPS motion or altitude")
 			}
-		} else if v.RecordingID != "" || v.FixQuality != nil || v.Satellites != nil || v.HDOP != nil || v.SpeedKPH != nil || v.CourseDegrees != nil || v.AltitudeMeters != nil {
+		} else if v.hasNativeGPSMetadata() {
 			return errors.New("GPS metadata requires a GPS location")
 		}
 	default:

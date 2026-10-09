@@ -284,3 +284,107 @@ func TestTripPaginationPreservesStableEqualTimeCursor(t *testing.T) {
 		t.Fatal("cursor lost equal timestamp row", err)
 	}
 }
+
+func TestLegacyGPSContextsRemainValidWithoutNativeProjection(t *testing.T) {
+	s, id := signalFixture(t)
+	ctx := context.Background()
+	at := time.Now().UTC().Add(-time.Hour)
+	legacy := SignalContext{Key: "legacy-gps", Kind: "location", ObservedAt: &at, Location: &SignalLocation{Type: "gps", Latitude: 0, Longitude: 0}}
+	if err := legacy.Validate(); err != nil {
+		t.Fatal("legacy GPS contract rejected", err)
+	}
+	batch := SignalBatch{Source: "pi", BatchID: "legacy-batch", Contexts: []SignalContext{legacy}}
+	e, err := s.CreateDevice(ctx, id, "Legacy fixture")
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := s.EnrollDevice(ctx, e.EnrollmentToken)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.IngestDeviceSignals(ctx, d.Token, batch); err != nil {
+		t.Fatal("legacy device context rejected", err)
+	}
+	if report, err := s.IngestDeviceSignals(ctx, d.Token, batch); err != nil || report.ContextsSkipped != 1 {
+		t.Fatal("legacy device retry changed identity", err)
+	}
+	dateOnly := legacy
+	dateOnly.Key = "legacy-date"
+	dateOnly.ObservedAt = nil
+	dateOnly.CalendarDate = "2026-10-01"
+	dateOnly.Timezone = "unknown"
+	gpsIngest(t, s, id, dateOnly)
+	if len(gpsTrips(t, s, id)) != 0 {
+		t.Fatal("legacy points acquired native trips")
+	}
+	if location, err := s.LatestLocation(ctx, id); err != nil || location != nil {
+		t.Fatal("legacy context relabeled as verified native fix", err)
+	}
+	if err := s.ClearGPSHistory(ctx, id); err != nil {
+		t.Fatal(err)
+	}
+	export, err := s.Export(ctx)
+	if err != nil || len(export.SignalContexts) != 2 {
+		t.Fatal("native history deletion erased legacy contexts", err)
+	}
+	for _, c := range export.SignalContexts {
+		if c.Context.Location.RecordingID != "" {
+			t.Fatal("device assigned native recording identity to legacy context")
+		}
+	}
+	partial := legacy
+	location := *legacy.Location
+	location.RecordingID = "incomplete-native"
+	partial.Location = &location
+	if partial.Validate() == nil {
+		t.Fatal("partial native fix accepted")
+	}
+}
+
+func TestLatestLocationUsesActualSmartcarTimestampAcrossSources(t *testing.T) {
+	s, id := signalFixture(t)
+	ctx := context.Background()
+	at := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
+	pi := gpsFix("pi", "recording", at, 0, 0, 0)
+	gpsIngest(t, s, id, pi)
+	newer := at.Add(900 * time.Nanosecond)
+	accuracy := 12.0
+	smartcar := SignalContext{Key: "smartcar", Kind: "location", ObservedAt: &newer, Location: &SignalLocation{Type: "LAST_PARKED", Latitude: 0, Longitude: 0, AccuracyMeters: &accuracy}}
+	batch := SignalBatch{Source: "smartcar", BatchID: "smartcar-actual", Contexts: []SignalContext{smartcar}}
+	if _, err := s.IngestSignals(ctx, id, batch); err != nil {
+		t.Fatal(err)
+	}
+	calendar := smartcar
+	calendar.Key = "smartcar-calendar"
+	calendar.ObservedAt = nil
+	calendar.CalendarDate = time.Now().UTC().Format(time.DateOnly)
+	calendar.Timezone = "unknown"
+	if _, err := s.IngestSignals(ctx, id, SignalBatch{Source: "smartcar", BatchID: "calendar", Contexts: []SignalContext{calendar}}); err != nil {
+		t.Fatal(err)
+	}
+	location, err := s.LatestLocation(ctx, id)
+	if err != nil || location == nil || location.Source != "smartcar" || !location.RecordedAt.Equal(newer) || location.Latitude != 0 || location.Longitude != 0 || location.AccuracyMeters == nil || *location.AccuracyMeters != accuracy {
+		t.Fatal("latest actual Smartcar position or provenance lost", err)
+	}
+	if len(gpsTrips(t, s, id)) != 0 {
+		t.Fatal("sparse Smartcar location created a trip")
+	}
+	if err := s.ClearGPSHistory(ctx, id); err != nil {
+		t.Fatal(err)
+	}
+	if location, err = s.LatestLocation(ctx, id); err != nil || location == nil || location.Source != "smartcar" || !location.RecordedAt.Equal(newer) {
+		t.Fatal("native GPS deletion erased Smartcar position", err)
+	}
+}
+
+func TestCalendarOnlySmartcarLocationNeverInventsCaptureTime(t *testing.T) {
+	s, id := signalFixture(t)
+	ctx := context.Background()
+	c := SignalContext{Key: "date-only", Kind: "location", CalendarDate: "2026-10-09", Timezone: "unknown", Location: &SignalLocation{Type: "gps", Latitude: 0, Longitude: 0}}
+	if _, err := s.IngestSignals(ctx, id, SignalBatch{Source: "smartcar", BatchID: "date-only", Contexts: []SignalContext{c}}); err != nil {
+		t.Fatal(err)
+	}
+	if location, err := s.LatestLocation(ctx, id); err != nil || location != nil {
+		t.Fatal("calendar position acquired a fabricated capture time", err)
+	}
+}

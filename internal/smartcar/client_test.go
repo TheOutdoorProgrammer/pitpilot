@@ -138,6 +138,24 @@ func TestSignalAdapterPresenceUnitsTimestampAndStableIdentity(t *testing.T) {
 	}
 }
 
+func TestSmartcarGPSLocationDoesNotRequirePiReceiverMetadata(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	stamp := now.Add(-time.Hour).Format(time.RFC3339Nano)
+	signal := fixtureSignal("location-preciselocation", `{"latitude":0,"longitude":0,"locationType":"gps"}`, stamp)
+	r := adapt("vehicle-fixture", []remoteSignal{signal}, now, nil)
+	if r.Unavailable != 0 || len(r.Batch.Contexts) != 1 || r.Batch.Validate() != nil {
+		t.Fatal("Smartcar GPS context rejected for missing Pi metadata")
+	}
+	c := r.Batch.Contexts[0]
+	if c.ObservedAt == nil || c.ObservedAt.Format(time.RFC3339Nano) != stamp || c.Location.RecordingID != "" || c.Location.HDOP != nil {
+		t.Fatal("adapter invented native metadata or replaced OEM timestamp")
+	}
+	signal.Meta.OEMUpdatedAt = "2026-10-01"
+	if r = adapt("vehicle-fixture", []remoteSignal{signal}, now, nil); len(r.Batch.Contexts) != 0 || r.Unavailable != 1 {
+		t.Fatal("adapter invented timestamp from calendar date")
+	}
+}
+
 func TestSignalAdapterTirePositionsAndPartialErrors(t *testing.T) {
 	now := time.Now().UTC()
 	tire := fixtureSignal("wheel-tires", `{"rowCount":2,"columnCount":2,"unit":"kPa","values":[{"row":0,"column":0,"tirePressure":0},{"row":1,"column":1,"tirePressure":220}]}`, now.Format(time.RFC3339Nano))
