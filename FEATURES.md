@@ -50,11 +50,15 @@ Connection recovery: [v0.1.1](https://github.com/TheOutdoorProgrammer/pitpilot/r
 - [x] Derive automatic trips with explicit recording gaps and show previous routes and actual last-known vehicle location.
 - [x] Offer Pi recording controls, trip deletion and location-history deletion that delayed uploads cannot undo.
 - [x] Refresh changed generated LubeLogger summaries explicitly, preserving previous source documents and measurements in versioned archives.
-- [ ] Verify these new native journeys on the self-hosted runner and publish the signed release.
-- [ ] Reconcile the final household LubeLogger snapshot and retire the old deployment after verified recovery backups.
+- [x] Verify these new native journeys on the self-hosted runner and publish the signed release.
+- [x] Reconcile the final household LubeLogger snapshot and retire the old deployment after verified recovery backups.
 - [ ] Validate the purchased USB receiver on the physical Pi and complete a real drive through delayed upload and native map display.
 
-The [GPS guide](docs/gps.md), [API contract](docs/api.md), [measurement guide](docs/vehicle-signals.md) and [migration workflow](docs/lubelogger-migration.md) describe the implemented contracts. Physical receiver reception, drive acceptance and final publication remain separate checks. The broader unchecked items below include functionality beyond this release.
+The [GPS guide](docs/gps.md), [API contract](docs/api.md), [measurement guide](docs/vehicle-signals.md) and [migration workflow](docs/lubelogger-migration.md) describe the implemented contracts. Physical receiver reception and drive acceptance remain separate checks. The broader unchecked items below include functionality beyond this release.
+
+[v0.5.0](https://github.com/TheOutdoorProgrammer/pitpilot/releases/tag/v0.5.0) passed 53 native unit tests and 11 UI journeys on the self-hosted runner in the [release workflow](https://github.com/TheOutdoorProgrammer/pitpilot/actions/runs/37883761950). Reviewed screenshots verify inline identifiers and photos, saved vehicle edits, dashboard chart previews, metric explanations, last-known-location navigation, recorded routes and GPS-history deletion. The signed [Fledge app is 0.5.0, build 22](https://fledge.theoutdoorprogrammer.com/a/com.theoutdoorprogrammer.pitpilot/4fb42f27c459); its downloaded bytes match the staged IPA. Backend race tests, vet and vulnerability checks passed. Quill built the GoReleaser binaries before the container copied them; both Linux runtime identities and signed collector manifests were verified.
+
+Deployed acceptance passed odometer calibration and replay checks, authenticated photo sanitization and export, reordered GPS trip ingestion, durable location deletion and legacy updater compatibility. Grafana verified the new backend and synthetic native-relay operations with the release version and correlated logs, without private record values. The schema upgrade preserved existing rows. Final source reconciliation preserved current records and prior converted-summary versions; repeated import reported no remaining work. A fresh off-cluster backup reopened with every table unchanged, and the existing actual odometer reading still matched both vehicle-list and detail responses. The old LubeLogger workload and routes were retired after these checks, preserving recovery storage and independent Home Assistant delivery. Physical GPS reception and a real phone session remain separate acceptance checks.
 
 ### Garage and records
 
@@ -72,7 +76,7 @@ The [GPS guide](docs/gps.md), [API contract](docs/api.md), [measurement guide](d
 
 ### Native iOS app
 
-- [ ] Provide garage, maintenance, integration status, and trip views in a native app.
+- [x] Provide garage, maintenance, integration status, and trip views in a native app.
 - [ ] Read cached records and queue new records or attachments offline; handle sync conflicts without silent data loss.
 - [ ] Capture receipts and documents with the camera or file picker and attach them to records.
 - [ ] Deliver configurable maintenance and integration notifications without repeated alert noise.
@@ -133,7 +137,7 @@ Physical collector installation and live Smartcar authorization have been exerci
 ### Trip history and maps
 
 - [ ] Validate a GPS source for the Pi workflow; evaluate phone recording separately, including background behavior and battery use.
-- [ ] Detect trips and stops from available evidence, tolerating delayed uploads, missing observations, and clock changes.
+- [x] Detect trips and stops from available evidence, tolerating delayed uploads, missing observations, and clock changes.
 - [ ] Show trip distance, duration, stops, source, and recording coverage; allow correction, splitting, merging, and deletion.
 - [ ] Display recorded routes and replay a drive on the native map, with explicit gaps and accuracy information.
 - [ ] Associate vehicle observations with a trip without confusing estimated distance with a measured odometer.

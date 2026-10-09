@@ -14,7 +14,7 @@ Opt-in USB GPS collection records actual fixes, queues them offline and derives 
 
 [LubeLogger migration](docs/lubelogger-migration.md) previews changes and applies them atomically, with duplicate prevention and conflict reporting. Supported source data and import blockers are documented in the migration guide.
 
-The iOS app stores its access token in Keychain and caches records, private photos and loaded measurement history for offline reading. It does not queue offline changes. Signed test builds are distributed through Fledge to devices included in the provisioning profile. The [release history](https://github.com/TheOutdoorProgrammer/pitpilot/releases) and [feature checklist](FEATURES.md) track publication and verified behavior; apps older than 0.2.0 cannot read the imported record categories.
+The iOS app stores its access token in Keychain and caches records, private photos and loaded measurement history for offline reading. It does not queue offline changes. Install [0.5.0, build 22 through Fledge](https://fledge.theoutdoorprogrammer.com/a/com.theoutdoorprogrammer.pitpilot/4fb42f27c459) on a device included in the provisioning profile. The [release history](https://github.com/TheOutdoorProgrammer/pitpilot/releases) and [feature checklist](FEATURES.md) track publication and verified behavior; apps older than 0.2.0 cannot read the imported record categories.
 
 The release includes the cancellation fix from 0.1.1. New refreshes replace older work, while genuine transport failures report a bounded diagnostic category through the authenticated telemetry relay.
 
