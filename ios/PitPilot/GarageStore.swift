@@ -256,7 +256,7 @@ final class GarageStore: ObservableObject {
             tripsHaveMore[id] = page.count == 50
             error = nil; persist()
         } catch is CancellationError { }
-        catch { if isCurrent(client), tripRevisions[id] == revision { error = error.localizedDescription } }
+        catch { if isCurrent(client), tripRevisions[id] == revision { self.error = error.localizedDescription } }
     }
 
     func deleteTrip(_ trip: Trip) async throws {
