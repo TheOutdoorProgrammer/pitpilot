@@ -2,10 +2,12 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
+	"time"
 
 	"github.com/TheOutdoorProgrammer/pitpilot/internal/garage"
 	"github.com/TheOutdoorProgrammer/pitpilot/internal/jsonutil"
@@ -16,8 +18,17 @@ import (
 
 func (s *Server) recoverReceiver(apply bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		ctx, span := otel.Tracer("pitpilot/migration").Start(r.Context(), "migration.receiver_recovery")
+		// Reconciliation may exceed the ordinary 30-second response timeout.
+		// Leave time to report a cancelled transaction before the socket expires.
+		ctx, cancel := context.WithTimeout(r.Context(), 110*time.Second)
+		defer cancel()
+		ctx, span := otel.Tracer("pitpilot/migration").Start(ctx, "migration.receiver_recovery")
 		defer span.End()
+		if err := http.NewResponseController(w).SetWriteDeadline(time.Now().Add(2 * time.Minute)); err != nil {
+			span.SetStatus(codes.Error, "recovery response deadline unavailable")
+			fail(w, http.StatusServiceUnavailable, "receiver recovery response deadline unavailable; retry with a supported server")
+			return
+		}
 		body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, receiverhistory.MaxRequestBytes))
 		if err != nil || jsonutil.Validate(body) != nil {
 			span.SetStatus(codes.Error, "invalid receiver recovery request")
@@ -44,6 +55,8 @@ func (s *Server) recoverReceiver(apply bool) http.HandlerFunc {
 		if err != nil {
 			span.SetStatus(codes.Error, "receiver recovery failed")
 			switch {
+			case ctx.Err() != nil:
+				fail(w, http.StatusServiceUnavailable, "receiver recovery interrupted; run preview again to confirm retained state")
 			case errors.Is(err, receiverhistory.ErrInvalid):
 				fail(w, 422, "invalid receiver history; nothing was imported")
 			case errors.Is(err, garage.ErrReceiverConflict), errors.Is(err, garage.ErrSignalConflict):

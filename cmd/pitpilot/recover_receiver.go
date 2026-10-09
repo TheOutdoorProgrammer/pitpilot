@@ -86,7 +86,7 @@ func recoverReceiver(args []string, output io.Writer) (runErr error) {
 		defer store.Close()
 		report, err = store.RecoverReceiver(ctx, request)
 		if err != nil {
-			return errors.New("receiver recovery rejected; source and target history retained")
+			return errors.New("receiver recovery failed; run preview again to confirm retained state")
 		}
 	} else {
 		u, err := url.Parse(*server)

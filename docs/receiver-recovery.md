@@ -22,6 +22,8 @@ Events with no original wall-clock timestamp are archived without generating cha
 
 The authenticated API exposes `POST /api/v1/migrations/receiver/preview` and `/apply`. Requests contain `vehicleId`, `snapshot` (`sha256`, `deviceId`, raw `events`) and optional `previewToken`. Only these routes accept up to 32 MiB; other request limits are unchanged. The CLI additionally bounds the source to 256 MiB, 100,000 events and 64 KiB per event, validates bbolt integrity and checks its hash before and after reading. An active bbolt writer is rejected.
 
+Authenticated recovery requests have a two-minute response deadline and a 110-second operation timeout. Ordinary API deadlines and request-body read timeouts remain unchanged. A cancelled request is rolled back unless its commit already completed; an interrupted response does not prove whether apply committed. Always preview again before retrying.
+
 `GET /api/v1/export` includes `receiverEventArchives`, containing original event JSON, backup provenance and the exact projection keys used for reconciliation. The additive export field retains export format version 3. Store exports and backups privately because vehicle history is sensitive.
 
 Operational logs and traces report only fixed operation names, errors and counts. Raw events, vehicle/device identifiers, paths, credentials and signal values are not included in telemetry.
