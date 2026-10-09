@@ -1,6 +1,6 @@
 # Vehicle measurements
 
-Vehicle signals provide dashboard values and history without turning measurements into maintenance notes. Pi and Smartcar adapters submit the same authenticated ingestion format. The built-in device enrollment and Smartcar authorization flows remain separate, unfinished work.
+Vehicle signals provide dashboard values and history without turning measurements into maintenance notes. Pi and Smartcar adapters submit the same authenticated ingestion format. See [device enrollment](device-api.md) and [Smartcar authorization](smartcar.md) for their authentication and setup flows.
 
 ## Ingestion
 
