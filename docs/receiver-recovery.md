@@ -2,7 +2,7 @@
 
 `pitpilot recover-receiver` recovers actual OBD events retained by the legacy Grinch receiver. It reads a **closed bbolt backup** without modifying it. Keep that original backup independently: the importer stores its SHA-256 and each original event, but the event archive is not a replacement for the entire source database.
 
-Recovery needs an existing PitPilot vehicle. First take a consistent PitPilot backup and rehearse against a copy. The server uses SQLite schema 7; returning to an older server requires restoring the pre-upgrade database, not opening schema 7 with old binaries.
+Recovery needs an existing PitPilot vehicle. First take a consistent PitPilot backup and rehearse against a copy. The server uses SQLite schema 8; returning to an older server requires restoring the matching pre-upgrade database, not bypassing the schema check. Vehicles with a [legacy telemetry discard policy](discard-legacy-signals.md) reject recovery so discarded readings cannot silently return.
 
 ```sh
 pitpilot recover-receiver --input receiver-closed.db \
