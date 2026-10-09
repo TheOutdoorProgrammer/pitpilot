@@ -4,7 +4,9 @@ Date: 2026-10-09
 
 ## Status
 
-Accepted.
+Accepted. Retention and replay after an owner explicitly discards legacy telemetry is superseded by [ADR-0010](0010-discard-legacy-telemetry-without-deleting-live-readings.md).
+
+Strict recovery validation, exact native overlap matching and independent source-backup preservation remain in force.
 
 ## Context and Problem Statement
 

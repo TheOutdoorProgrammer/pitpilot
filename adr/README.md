@@ -9,3 +9,4 @@
 | [0007](0007-keep-bounded-vehicle-photos-inside-the-garage-database.md) | Keep bounded vehicle photos inside the garage database | Keep bounded vehicle photos inside the garage database |
 | [0008](0008-version-converted-summaries-before-refreshing-their-measurem.md) | Version converted summaries before refreshing their measurements | Version converted summaries before refreshing their measurements |
 | [0009](0009-recover-receiver-history-through-immutable-event-archives-an.md) | Recover receiver history through immutable event archives and transactional reconciliation | Import genuine timed readings with replay-safe archives and explicit overlap reconciliation. |
+| [0010](0010-discard-legacy-telemetry-without-deleting-live-readings.md) | Discard legacy telemetry without deleting live readings | Delete only imported telemetry with proof of ownership and prevent its replay while preserving live data. |
