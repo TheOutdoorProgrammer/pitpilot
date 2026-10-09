@@ -125,7 +125,7 @@ func (q SignalHistoryQuery) Validate() error {
 		return errors.New("unknown signal metric")
 	}
 	switch q.Statistic {
-	case "sample", "snapshot", "min", "max", "mean", "sum", "count":
+	case "all", "sample", "snapshot", "min", "max", "mean", "sum", "count":
 	default:
 		return errors.New("invalid signal statistic")
 	}
@@ -161,6 +161,7 @@ type SignalHistorySeries struct {
 	Source    string               `json:"source"`
 	Quality   string               `json:"quality"`
 	Statistic string               `json:"statistic"`
+	Unit      string               `json:"unit"`
 	Points    []SignalHistoryPoint `json:"points"`
 }
 type SignalHistory struct {
@@ -197,7 +198,7 @@ func (s *Store) SignalHistory(ctx context.Context, vehicleID string, q SignalHis
 	if q.Statistic != "sample" {
 		upper = upper.Add(366 * 24 * time.Hour)
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT source,quality,data FROM signals WHERE vehicle_id=? AND metric=? AND statistic=? AND sort_time>=? AND sort_time<=? AND (?='' OR source=?) AND (?='' OR quality=?) ORDER BY sort_time,key`, vehicleID, q.Metric, q.Statistic, calendarFrom.UnixMilli(), upper.UnixMilli(), q.Source, q.Source, q.Quality, q.Quality)
+	rows, err := tx.QueryContext(ctx, `SELECT source,quality,data FROM signals WHERE vehicle_id=? AND metric=? AND (?='all' OR statistic=?) AND sort_time>=? AND sort_time<=? AND (?='' OR source=?) AND (?='' OR quality=?) ORDER BY sort_time,key`, vehicleID, q.Metric, q.Statistic, q.Statistic, calendarFrom.UnixMilli(), upper.UnixMilli(), q.Source, q.Source, q.Quality, q.Quality)
 	if err != nil {
 		return out, err
 	}
@@ -230,7 +231,7 @@ func (s *Store) SignalHistory(ctx context.Context, vehicleID string, q SignalHis
 				continue
 			}
 		}
-		id := source + "/" + quality
+		id := source + "/" + quality + "/" + o.Statistic
 		bucket := "date/" + o.CalendarDate
 		var start, end *time.Time
 		if o.CalendarDate == "" {
@@ -253,7 +254,7 @@ func (s *Store) SignalHistory(ctx context.Context, vehicleID string, q SignalHis
 		}
 		if groups[id] == nil {
 			groups[id] = map[string]*SignalHistoryPoint{}
-			identities[id] = SignalHistorySeries{Source: source, Quality: quality, Statistic: q.Statistic, Points: []SignalHistoryPoint{}}
+			identities[id] = SignalHistorySeries{Source: source, Quality: quality, Statistic: o.Statistic, Unit: o.Unit, Points: []SignalHistoryPoint{}}
 		}
 		p := groups[id][bucket]
 		if p == nil {

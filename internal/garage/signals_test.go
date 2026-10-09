@@ -196,6 +196,62 @@ func TestSignalHistoryPreservesExtremaQualityAndCalendarPrecision(t *testing.T) 
 	}
 }
 
+func TestSignalHistoryAllPreservesStatisticsUnitsAndPrecision(t *testing.T) {
+	s, id := signalFixture(t)
+	ctx := context.Background()
+	start := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
+	end := start.Add(24 * time.Hour)
+	batch := SignalBatch{Source: "pi", BatchID: "mixed"}
+	for i := range 240 {
+		batch.Observations = append(batch.Observations, signalSample(fmt.Sprint(i), float64(i%100), start.Add(time.Duration(i)*time.Minute)))
+	}
+	for _, statistic := range []string{"mean", "max", "count"} {
+		unit, _ := signalUnit("manifold_kpa", statistic)
+		batch.Observations = append(batch.Observations, SignalObservation{Key: statistic, Metric: "manifold_kpa", Unit: unit, Statistic: statistic, Quality: "measured", Value: 90, PeriodStart: &start, PeriodEnd: &end})
+	}
+	ingestFixture(t, s, id, batch)
+	ingestFixture(t, s, id, SignalBatch{Source: "lubelogger", BatchID: "calendar", Observations: []SignalObservation{{Key: "day", Metric: "manifold_kpa", Unit: "kPa", Statistic: "snapshot", Quality: "measured", Value: 42, CalendarDate: "2026-06-01", Timezone: "unknown"}}})
+	estimate := signalSample("estimated", 60, start.Add(time.Hour))
+	estimate.Quality = "estimated"
+	ingestFixture(t, s, id, SignalBatch{Source: "smartcar", BatchID: "estimate", Observations: []SignalObservation{estimate}})
+	before, err := s.Export(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	q := SignalHistoryQuery{Metric: "manifold_kpa", Statistic: "all", From: start, To: start.Add(12 * time.Hour), MaxPoints: 3}
+	history, err := s.SignalHistory(ctx, id, q)
+	if err != nil || len(history.Series) != 6 || history.Unit != "kPa" {
+		t.Fatalf("mixed history: %v %+v", err, history)
+	}
+	for _, series := range history.Series {
+		if len(series.Points) > q.MaxPoints {
+			t.Fatalf("unbounded timestamp series: %+v", series)
+		}
+		wantUnit, _ := signalUnit(q.Metric, series.Statistic)
+		if series.Unit != wantUnit {
+			t.Fatalf("statistic unit changed: %+v", series)
+		}
+		if series.Statistic == "snapshot" {
+			p := series.Points[0]
+			if p.CalendarDate != "2026-06-01" || p.Timezone != "unknown" || p.FirstObservedAt != nil || p.BucketStart != nil || p.WindowStart != nil {
+				t.Fatalf("invented imported timestamp: %+v", p)
+			}
+		}
+		one := q
+		one.Statistic, one.Source, one.Quality = series.Statistic, series.Source, series.Quality
+		individual, err := s.SignalHistory(ctx, id, one)
+		if err != nil || len(individual.Series) != 1 || !reflect.DeepEqual(individual.Series[0], series) {
+			t.Fatalf("combined query changed source values: %v %+v %+v", err, individual, series)
+		}
+	}
+	q.Source, q.Quality = "smartcar", "estimated"
+	filtered, err := s.SignalHistory(ctx, id, q)
+	if err != nil || len(filtered.Series) != 1 || filtered.Series[0].Source != "smartcar" || filtered.Series[0].Quality != "estimated" {
+		t.Fatalf("combined query ignored filters: %v %+v", err, filtered)
+	}
+	assertConversionUnchanged(t, s, before)
+}
+
 func TestSignalContextsAndStrictInput(t *testing.T) {
 	s, id := signalFixture(t)
 	at := time.Now().UTC()

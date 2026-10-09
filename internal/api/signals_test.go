@@ -51,6 +51,35 @@ func TestSignalAPIAndReadOnlyMetricsAuthentication(t *testing.T) {
 	if _, err := store.IngestSignals(context.Background(), v.ID, countBatch); err != nil {
 		t.Fatal(err)
 	}
+	for _, statistic := range []string{"", "all", "count", "invalid"} {
+		w := request(disabled, "GET", base+"/history?metric=manifold_kpa&statistic="+statistic, "")
+		if statistic == "invalid" {
+			if w.Code != 422 {
+				t.Fatal("invalid statistic accepted", w.Code)
+			}
+			continue
+		}
+		var history garage.SignalHistory
+		if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &history) != nil {
+			t.Fatalf("history %q: %d %s", statistic, w.Code, w.Body)
+		}
+		want := 1
+		if statistic == "all" {
+			want = 2
+		}
+		if len(history.Series) != want || (statistic == "" && history.Series[0].Statistic != "sample") {
+			t.Fatalf("history selection %q: %+v", statistic, history)
+		}
+		for _, series := range history.Series {
+			wantUnit := "kPa"
+			if series.Statistic == "count" {
+				wantUnit = "count"
+			}
+			if series.Unit != wantUnit {
+				t.Fatalf("history mixed incompatible units: %+v", series)
+			}
+		}
+	}
 	var logs bytes.Buffer
 	handler, err := NewWithOptions(store, testToken, slog.New(slog.NewJSONHandler(&logs, nil)), Options{MetricsToken: scrapeToken})
 	if err != nil {
