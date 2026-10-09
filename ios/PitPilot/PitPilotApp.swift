@@ -70,7 +70,7 @@ struct ConnectionView: View {
 
 struct GarageView: View {
     @EnvironmentObject private var store: GarageStore
-    private enum Sheet: String, Identifiable { case vehicle, settings; var id: String { rawValue } }
+    private enum Sheet: String, Identifiable { case vehicle, menu; var id: String { rawValue } }
     @State private var sheet: Sheet?
     var body: some View {
         ScrollView {
@@ -97,7 +97,7 @@ struct GarageView: View {
             }.frame(maxWidth: .infinity).background(PitStyle.background)
                 .navigationTitle("PitPilot")
                 .toolbar {
-                    ToolbarItem(placement: .topBarLeading) { Button("Settings", systemImage: "gearshape") { sheet = .settings }.labelStyle(.iconOnly) }
+                    ToolbarItem(placement: .topBarLeading) { Button("Open menu", systemImage: "line.3.horizontal") { sheet = .menu }.labelStyle(.iconOnly).accessibilityIdentifier("garageMenu") }
                     ToolbarItem(placement: .topBarTrailing) { Button("Add vehicle", systemImage: "plus") { sheet = .vehicle }.labelStyle(.iconOnly).disabled(store.offline) }
                 }
                 .navigationDestination(for: String.self) { id in
@@ -106,15 +106,17 @@ struct GarageView: View {
                 .refreshable { await store.refresh() }
                 .task { await store.refresh() }
         .sheet(item: $sheet) { item in
-            switch item { case .vehicle: AddVehicleView(); case .settings: SettingsView() }
+            switch item { case .vehicle: AddVehicleView(); case .menu: GarageMenuView() }
         }
     }
 }
 
 struct VehicleCard: View {
     let vehicle: Vehicle
+    var showDetails = false
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
+            if vehicle.photoRevision != nil { VehiclePhotoView(vehicle: vehicle).clipShape(RoundedRectangle(cornerRadius: 14)) }
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 5) {
                     Text(vehicle.name).font(.title2.weight(.bold)).foregroundStyle(.white)
@@ -137,9 +139,19 @@ struct VehicleCard: View {
                         .font(.caption).foregroundStyle(PitStyle.amber)
                 }
             }
+            if showDetails {
+                VStack(alignment: .leading, spacing: 10) {
+                    if let vin = vehicle.vin, !vin.isEmpty { LabeledContent("VIN", value: vin).textSelection(.enabled).accessibilityIdentifier("vehicleInlineVIN") }
+                    if let plate = vehicle.licensePlate, !plate.isEmpty { LabeledContent("License plate", value: plate).textSelection(.enabled) }
+                    if let notes = vehicle.notes, !notes.isEmpty { Text(notes).textSelection(.enabled) }
+                    MetadataContent(tags: vehicle.tags, fields: vehicle.extraFields, source: vehicle.source)
+                }.font(.subheadline).fixedSize(horizontal: false, vertical: true).accessibilityIdentifier("vehicleInformation")
+            } else if let plate = vehicle.licensePlate, !plate.isEmpty {
+                Label(plate, systemImage: "rectangle.inset.filled").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+            }
             Rectangle().fill(PitStyle.amber).frame(height: 3)
         }.padding(24).background(LinearGradient(colors: [PitStyle.panel, PitStyle.panel.opacity(0.6)], startPoint: .topLeading, endPoint: .bottomTrailing), in: RoundedRectangle(cornerRadius: 24))
-            .accessibilityElement(children: .combine)
+            .accessibilityElement(children: showDetails ? .contain : .combine)
     }
 }
 
@@ -158,6 +170,7 @@ struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var confirm = false
     @State private var error: String?
+    @State private var disconnecting = false
     var body: some View {
         NavigationStack {
             Form {
@@ -167,7 +180,7 @@ struct SettingsView: View {
                 }
                 Section("On this phone") {
                     Text("Vehicles, records, reminders, and loaded trips are cached for offline reading. Changes require a server connection. Cached trip locations are protected and excluded from device backups.")
-                    Button("Disconnect and clear saved data", role: .destructive) { confirm = true }
+                    Button("Disconnect and clear saved data", role: .destructive) { confirm = true }.disabled(disconnecting)
                 }
                 Section("About") {
                     LabeledContent("PitPilot", value: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.1.1")
@@ -177,7 +190,10 @@ struct SettingsView: View {
                 if let error { Text(error).foregroundStyle(.red) }
             }.navigationTitle("Settings").toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
                 .confirmationDialog("Disconnect from this garage?", isPresented: $confirm, titleVisibility: .visible) {
-                    Button("Disconnect", role: .destructive) { do { try store.disconnect(); dismiss() } catch { self.error = error.localizedDescription } }
+                    Button("Disconnect", role: .destructive) {
+                        disconnecting = true
+                        Task { do { try await store.disconnect(); dismiss() } catch { self.error = error.localizedDescription }; disconnecting = false }
+                    }
                 } message: { Text("Removes the token and saved data from this phone. Your server's data stays intact.") }
         }
     }

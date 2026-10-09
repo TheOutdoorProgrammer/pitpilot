@@ -5,6 +5,9 @@ struct SignalDefinition: Codable, Identifiable {
     let label: String
     let unit: String
     let staleAfterSeconds: Int
+    var description: String?
+    var interpretation: String?
+    var valueLabels: [String: String]?
     var id: String { metric }
 }
 
@@ -52,6 +55,13 @@ struct LatestSignals: Codable {
     let series: [LatestSignal]
     var contexts: [SourcedSignalContext]?
     var metrics: [String] { Array(Set(series.map(\.metric))).sorted { label($0).localizedStandardCompare(label($1)) == .orderedAscending } }
+    var dashboardMetrics: [String] {
+        let featured = ["fuel_level_pct", "battery_soc_pct", "odometer_km", "adapter_voltage_v", "coolant_c", "rpm", "manifold_kpa", "speed_kph"]
+        return metrics.sorted {
+            let a = featured.firstIndex(of: $0) ?? featured.count, b = featured.firstIndex(of: $1) ?? featured.count
+            return a == b ? label($0).localizedStandardCompare(label($1)) == .orderedAscending : a < b
+        }
+    }
     func label(_ metric: String) -> String { definitions.first { $0.metric == metric }?.label ?? metric.replacingOccurrences(of: "_", with: " ").capitalized }
     func definition(_ metric: String) -> SignalDefinition? { definitions.first { $0.metric == metric } }
     func readings(_ metric: String) -> [LatestSignal] {
@@ -192,8 +202,10 @@ struct SignalChartData {
     let calendar: Bool
     let kind: SignalChartKind
     let statistic: String
+    let valueLabels: [String: String]?
 
-    init(series: SignalHistorySeries, unit: String, calendar: Bool, maximumJoinGapSeconds: Int = 900) {
+    init(series: SignalHistorySeries, unit: String, calendar: Bool, maximumJoinGapSeconds: Int = 900, valueLabels: [String: String]? = nil) {
+        self.valueLabels = valueLabels
         self.calendar = calendar
         statistic = series.statistic
         kind = .resolve(unit: unit, statistic: series.statistic)
@@ -248,7 +260,8 @@ struct SignalChartData {
 
     var stateMarks: [SignalStateMark] {
         buckets.flatMap { bucket -> [SignalStateMark] in
-            let label = kind == .state ? bucket.state : bucket.category
+            let rawLabel = kind == .state ? bucket.state : bucket.category
+            let label = rawLabel == "Mixed" || rawLabel == "Unknown" ? rawLabel : SignalFormat.value(bucket.point.minimum, unit: kind == .state ? "boolean" : "code", labels: valueLabels)
             if calendar || statistic != "sample" {
                 return [SignalStateMark(id: bucket.id, start: bucket.center, end: bucket.center, label: label, summary: true)]
             }
@@ -260,7 +273,7 @@ struct SignalChartData {
                 if let date = timestamp.flatMap(SignalFormat.date) {
                     let x = date.timeIntervalSince1970
                     marks.append(SignalStateMark(id: "\(bucket.id)/\(name)", start: x, end: x,
-                        label: SignalFormat.value(value, unit: kind == .state ? "boolean" : "code"), summary: false))
+                        label: SignalFormat.value(value, unit: kind == .state ? "boolean" : "code", labels: valueLabels), summary: false))
                 }
             }
             if marks.isEmpty || label == "Mixed" || label == "Unknown" {
@@ -385,7 +398,8 @@ enum SignalFormat {
         guard let start, let end, let first = date(start), let last = date(end) else { return "Time unavailable" }
         return "\(first.formatted(date: .abbreviated, time: .shortened)) to \(last.formatted(date: .abbreviated, time: .shortened))"
     }
-    static func value(_ number: Double, unit: String) -> String {
+    static func value(_ number: Double, unit: String, labels: [String: String]? = nil) -> String {
+        if number.isFinite, number.rounded() == number, let label = labels?[String(format: "%.0f", locale: Locale(identifier: "en_US_POSIX"), number)] { return label }
         if unit == "boolean" { return number == 0 ? "Off" : number == 1 ? "On" : "Unknown" }
         if unit == "code" { return number.rounded() == number ? "Code \(number.formatted(.number.precision(.fractionLength(0))))" : "Unknown code" }
         let label: String

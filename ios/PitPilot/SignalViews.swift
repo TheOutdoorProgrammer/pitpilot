@@ -3,6 +3,7 @@ import Charts
 
 struct VehicleSignalsView: View {
     @EnvironmentObject private var store: GarageStore
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let vehicleID: String
     private var latest: LatestSignals? { store.signals(vehicleID) }
 
@@ -23,12 +24,12 @@ struct VehicleSignalsView: View {
                 Text("Tap a reading to explore its history.")
                     .font(.subheadline).foregroundStyle(.secondary)
                 TimelineView(.periodic(from: .now, by: 60)) { context in
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 280), alignment: .top)], alignment: .leading, spacing: 14) {
-                        ForEach(latest.metrics, id: \.self) { metric in
+                    LazyVGrid(columns: dynamicTypeSize.isAccessibilitySize ? [GridItem(.flexible())] : [GridItem(.adaptive(minimum: 160), alignment: .top)], alignment: .leading, spacing: 14) {
+                        ForEach(latest.dashboardMetrics, id: \.self) { metric in
                             NavigationLink {
                                 SignalHistoryView(vehicleID: vehicleID, metric: metric, latest: latest)
                             } label: {
-                                SignalCard(metric: metric, latest: latest, now: context.date)
+                                SignalCard(vehicleID: vehicleID, metric: metric, latest: latest, now: context.date)
                             }.buttonStyle(.plain).accessibilityIdentifier("signal-\(metric)")
                         }
                     }
@@ -52,6 +53,7 @@ struct VehicleSignalsView: View {
 }
 
 private struct SignalCard: View {
+    let vehicleID: String
     let metric: String
     let latest: LatestSignals
     let now: Date
@@ -61,14 +63,13 @@ private struct SignalCard: View {
             HStack {
                 Text(latest.label(metric)).font(.headline)
                 Spacer()
-                Image(systemName: "chart.xyaxis.line").foregroundStyle(PitStyle.amber).accessibilityHidden(true)
                 Image(systemName: "chevron.right").font(.caption).foregroundStyle(.secondary).accessibilityHidden(true)
             }
             if let reading = readings.first {
                 VStack(alignment: .leading, spacing: 5) {
                     Text(reading.latest.calendarDate == nil ? SignalFormat.statistic(reading.statistic) : "Daily \(SignalFormat.statistic(reading.statistic).lowercased())")
                         .font(.caption.weight(.semibold)).foregroundStyle(PitStyle.amber)
-                    Text(SignalFormat.value(reading.latest.value, unit: reading.unit))
+                    Text(SignalFormat.value(reading.latest.value, unit: reading.unit, labels: latest.definition(metric)?.valueLabels))
                         .font(.system(.title, design: .rounded, weight: .bold)).monospacedDigit().foregroundStyle(.primary)
                     Text("\(SignalFormat.source(reading.source)) · \(reading.quality.capitalized)")
                         .font(.caption).foregroundStyle(.secondary)
@@ -80,11 +81,12 @@ private struct SignalCard: View {
                     }
                 }.accessibilityElement(children: .combine)
             }
+            SignalPreview(vehicleID: vehicleID, metric: metric, latest: latest)
             let summaries = Array(readings.dropFirst()).filter { ["min", "max"].contains($0.statistic) }
             if !summaries.isEmpty {
                 VStack(alignment: .leading, spacing: 6) {
                     ForEach(summaries) { reading in
-                        Text("\(SignalFormat.statistic(reading.statistic)): \(SignalFormat.value(reading.latest.value, unit: reading.unit))")
+                        Text("\(SignalFormat.statistic(reading.statistic)): \(SignalFormat.value(reading.latest.value, unit: reading.unit, labels: latest.definition(metric)?.valueLabels))")
                             .font(.subheadline.weight(.semibold))
                     }
                     Text("Historical periods; tap for times and sources").font(.caption).foregroundStyle(.secondary)
@@ -93,7 +95,7 @@ private struct SignalCard: View {
             if readings.count > 1 {
                 Text("More readings and summaries").font(.caption).foregroundStyle(PitStyle.amber)
             }
-        }.frame(maxWidth: .infinity, alignment: .leading).padding(20)
+        }.frame(maxWidth: .infinity, alignment: .leading).padding(16)
             .background(PitStyle.panel, in: RoundedRectangle(cornerRadius: 20))
             .accessibilityElement(children: .combine)
             .accessibilityHint("Opens history chart")
@@ -131,7 +133,7 @@ struct SignalHistoryView: View {
             VStack(alignment: .leading, spacing: 20) {
                 if let reading = latest.readings(metric).first(where: { $0.statistic == statistic }) {
                     VStack(alignment: .leading, spacing: 5) {
-                        Text(SignalFormat.value(reading.latest.value, unit: reading.unit))
+                        Text(SignalFormat.value(reading.latest.value, unit: reading.unit, labels: latest.definition(metric)?.valueLabels))
                             .font(.system(size: 38, weight: .bold, design: .rounded)).monospacedDigit()
                         Text("Last reported · \(reading.latest.calendarDate ?? reading.latest.timeLabel)")
                             .font(.subheadline).foregroundStyle(.secondary)
@@ -156,7 +158,7 @@ struct SignalHistoryView: View {
                 if let history, !history.series.allSatisfy({ $0.points.isEmpty }) {
                     ForEach(history.series) { series in
                         ForEach([false, true], id: \.self) { calendar in
-                            let data = SignalChartData(series: series, unit: history.unit, calendar: calendar)
+                            let data = SignalChartData(series: series, unit: history.unit, calendar: calendar, valueLabels: latest.definition(metric)?.valueLabels)
                             if !data.buckets.isEmpty {
                                 SignalSeriesChart(data: data, series: series, unit: history.unit)
                             }
@@ -183,7 +185,7 @@ struct SignalHistoryView: View {
                             ForEach(history.series) { series in
                                 Text(series.label).font(.headline).padding(.top, 12)
                                 ForEach(series.points) { point in
-                                    SignalBucketDetails(point: point, unit: history.unit, statistic: series.statistic)
+                                    SignalBucketDetails(point: point, unit: history.unit, statistic: series.statistic, valueLabels: latest.definition(metric)?.valueLabels)
                                 }
                             }
                         }
@@ -192,6 +194,15 @@ struct SignalHistoryView: View {
                     ContentUnavailableView("No readings in this range", systemImage: "chart.xyaxis.line",
                         description: Text("Choose a wider range or a different reading type. No values have been filled in."))
                 }
+                VStack(alignment: .leading, spacing: 12) {
+                    Label("What this measures", systemImage: "info.circle").font(.headline).foregroundStyle(PitStyle.amber)
+                    Text(latest.definition(metric)?.description ?? "\(latest.label(metric)) is reported by your vehicle or its connected service. Values are shown in \(latest.definition(metric)?.unit ?? "the reported unit").")
+                    Text("How to read it").font(.subheadline.weight(.semibold))
+                    Text(latest.definition(metric)?.interpretation ?? "Compare readings from the same source and under similar conditions. A trend alone does not diagnose a fault; missing or stale readings do not mean zero.")
+                }.font(.subheadline).fixedSize(horizontal: false, vertical: true)
+                    .padding(18).frame(maxWidth: .infinity, alignment: .leading)
+                    .background(PitStyle.panel, in: RoundedRectangle(cornerRadius: 18))
+                    .accessibilityIdentifier("metricExplanation")
             }.padding(20).frame(maxWidth: 760)
         }.frame(maxWidth: .infinity).background(PitStyle.background)
             .navigationTitle(latest.label(metric)).navigationBarTitleDisplayMode(.inline)
@@ -265,7 +276,7 @@ private struct SignalSeriesChart: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
             if let selection, let bucket = data.buckets.min(by: { abs($0.center - selection) < abs($1.center - selection) }) {
-                SignalBucketDetails(point: bucket.point, unit: unit, statistic: series.statistic)
+                SignalBucketDetails(point: bucket.point, unit: unit, statistic: series.statistic, valueLabels: data.valueLabels)
                     .padding(12).frame(maxWidth: .infinity, alignment: .leading)
                     .background(PitStyle.background, in: RoundedRectangle(cornerRadius: 12))
             }
@@ -357,7 +368,11 @@ private struct SignalSeriesChart: View {
         .frame(height: max(160, CGFloat(stateLanes.count) * 46)).accessibilityIdentifier(identifier)
     }
     private var stateLanes: [String] {
-        if data.kind == .state { return ["Off", "On", "Mixed", "Unknown"].filter { lane in lane == "Off" || lane == "On" || data.stateMarks.contains { $0.label == lane } } }
+        if data.kind == .state {
+            let off = SignalFormat.value(0, unit: "boolean", labels: data.valueLabels)
+            let on = SignalFormat.value(1, unit: "boolean", labels: data.valueLabels)
+            return [off, on, "Mixed", "Unknown"].filter { lane in lane == off || lane == on || data.stateMarks.contains { $0.label == lane } }
+        }
         return Array(Set(data.stateMarks.map(\.label))).sorted { $0.localizedStandardCompare($1) == .orderedAscending }
     }
     @AxisContentBuilder private var timeAxis: some AxisContent {
@@ -373,15 +388,17 @@ private struct SignalBucketDetails: View {
     let point: SignalHistoryPoint
     let unit: String
     let statistic: String
+    var valueLabels: [String: String]?
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
             Text(point.calendarDate.map { "\($0) · Time and timezone unknown" } ?? SignalFormat.interval(point.windowStart, point.windowEnd))
                 .font(.caption).foregroundStyle(.secondary)
             if unit == "boolean" || unit == "code" {
                 let bucket = SignalChartBucket(point: point, start: 0, end: 0, calendar: point.calendarDate != nil)
-                Text(unit == "boolean" ? bucket.state : bucket.category).font(.headline)
+                let rawLabel = unit == "boolean" ? bucket.state : bucket.category
+                Text(rawLabel == "Mixed" || rawLabel == "Unknown" ? rawLabel : SignalFormat.value(point.minimum, unit: unit, labels: valueLabels)).font(.headline)
                 if point.minimum != point.maximum { Text("Multiple states recorded; transition times unavailable.").font(.caption).foregroundStyle(.secondary) }
-                Text("First \(SignalFormat.value(point.first, unit: unit)) · Last \(SignalFormat.value(point.last, unit: unit))").font(.caption)
+                Text("First \(SignalFormat.value(point.first, unit: unit, labels: valueLabels)) · Last \(SignalFormat.value(point.last, unit: unit, labels: valueLabels))").font(.caption)
                 Text("\(point.count) \(statistic == "sample" ? "readings" : "summaries")").font(.caption).foregroundStyle(.secondary)
             } else {
                 Text("Min \(SignalFormat.value(point.minimum, unit: unit)) · Max \(SignalFormat.value(point.maximum, unit: unit))")
@@ -389,10 +406,10 @@ private struct SignalBucketDetails: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
             if statistic == "sample", let date = point.firstObservedAt {
-                Text("First: \(SignalFormat.value(point.first, unit: unit)) at \(SignalFormat.date(date)?.formatted() ?? date)").font(.caption)
+                Text("First: \(SignalFormat.value(point.first, unit: unit, labels: valueLabels)) at \(SignalFormat.date(date)?.formatted() ?? date)").font(.caption)
             }
             if statistic == "sample", let date = point.lastObservedAt, date != point.firstObservedAt {
-                Text("Last: \(SignalFormat.value(point.last, unit: unit)) at \(SignalFormat.date(date)?.formatted() ?? date)").font(.caption)
+                Text("Last: \(SignalFormat.value(point.last, unit: unit, labels: valueLabels)) at \(SignalFormat.date(date)?.formatted() ?? date)").font(.caption)
             }
         }.accessibilityElement(children: .combine)
     }

@@ -6,6 +6,8 @@ struct VehicleDevice: Codable, Identifiable {
     let name: String
     let createdAt: String
     var autoUpdate: Bool
+    var gpsRecording: Bool?
+    var gpsState: String?
     var enrolledAt: String?
     var revokedAt: String?
     var lastSeenAt: String?
@@ -215,6 +217,13 @@ final class VehicleIntegrations: ObservableObject {
     func autoUpdate(_ device: VehicleDevice, enabled: Bool) async {
         await perform {
             let updated: VehicleDevice = try await self.client.request("devices/\(device.id)", method: "PATCH", body: APIClient.body(["autoUpdate": enabled]))
+            self.devices = self.devices.map { $0.id == updated.id ? updated : $0 }
+        }
+    }
+
+    func recordGPS(_ device: VehicleDevice, enabled: Bool) async {
+        await perform {
+            let updated: VehicleDevice = try await self.client.request("devices/\(device.id)", method: "PATCH", body: APIClient.body(["gpsRecording": enabled]))
             self.devices = self.devices.map { $0.id == updated.id ? updated : $0 }
         }
     }

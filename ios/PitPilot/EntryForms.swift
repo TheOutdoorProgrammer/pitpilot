@@ -1,4 +1,5 @@
 import SwiftUI
+import PhotosUI
 
 struct EntryToolbar: ToolbarContent {
     let working: Bool
@@ -24,21 +25,47 @@ struct AddVehicleView: View {
     @State private var year = ""
     @State private var mileage = "0"
     @State private var odometerStatus = "unknown"
+    @State private var vin = ""
+    @State private var licensePlate = ""
+    @State private var selectedPhoto: PhotosPickerItem?
+    @State private var photoData: Data?
+    @State private var removePhoto = false
+    @State private var loadingPhoto = false
+    @State private var photoRequest = UUID()
+    @State private var initialized = false
+    @State private var savedVehicleID: String?
     @State private var working = false
     @State private var error: String?
     private var parsedYear: Int? { year.isEmpty ? 0 : Int(year) }
+    private var originalVehicle: Vehicle? { savedVehicleID.flatMap { id in store.vehicles.first { $0.id == id } } ?? vehicle }
     private var valid: Bool {
         guard let year = parsedYear, Input.number(mileage) != nil else { return false }
-        return !name.trimmingCharacters(in: .whitespaces).isEmpty && name.count <= 200 && (year == 0 || (1886...(Calendar.current.component(.year, from: Date()) + 2)).contains(year))
+        return !name.trimmingCharacters(in: .whitespaces).isEmpty && name.count <= 200 && vin.utf8.count <= 100 && licensePlate.utf8.count <= 100 && !loadingPhoto && !store.offline && (year == 0 || (1886...(Calendar.current.component(.year, from: Date()) + 2)).contains(year))
     }
     var body: some View {
         NavigationStack {
             Form {
                 Section("Give it a name") { TextField("Vehicle name", text: $name).accessibilityIdentifier("vehicleName") }
+                Section("Vehicle photo") {
+                    if let photoData, let preview = UIImage(data: photoData) {
+                        Image(uiImage: preview).resizable().scaledToFit().frame(maxHeight: 180).frame(maxWidth: .infinity).accessibilityLabel("Selected vehicle photo")
+                    } else if let originalVehicle, originalVehicle.photoRevision != nil, !removePhoto {
+                        VehiclePhotoView(vehicle: originalVehicle)
+                    }
+                    PhotosPicker(selection: $selectedPhoto, matching: .images) {
+                        Label(loadingPhoto ? "Preparing photo…" : "Choose photo", systemImage: "photo.on.rectangle")
+                    }.disabled(working || loadingPhoto).accessibilityIdentifier("chooseVehiclePhoto")
+                    if photoData != nil || (originalVehicle?.photoRevision != nil && !removePhoto) {
+                        Button("Remove photo", role: .destructive) { photoData = nil; selectedPhoto = nil; removePhoto = true }
+                    }
+                    Text("Location and camera metadata are removed before upload.").font(.footnote).foregroundStyle(.secondary)
+                }
                 Section("Vehicle details") {
                     LabeledContent("Make") { TextField("Make", text: $make).multilineTextAlignment(.trailing) }
                     LabeledContent("Model") { TextField("Model", text: $model).multilineTextAlignment(.trailing) }
                     LabeledContent("Year") { TextField("Optional", text: $year).keyboardType(.numberPad).multilineTextAlignment(.trailing) }
+                    LabeledContent("VIN") { TextField("Optional VIN", text: $vin).textInputAutocapitalization(.characters).autocorrectionDisabled().multilineTextAlignment(.trailing).accessibilityIdentifier("vehicleVIN") }
+                    LabeledContent("License plate") { TextField("Optional plate", text: $licensePlate).textInputAutocapitalization(.characters).autocorrectionDisabled().multilineTextAlignment(.trailing).accessibilityIdentifier("vehicleLicensePlate") }
                     LabeledContent("Odometer (mi)") { TextField("Odometer in miles", text: $mileage).keyboardType(.decimalPad).multilineTextAlignment(.trailing) }
                     Picker("Reading method", selection: $odometerStatus) {
                         Text("Unspecified").tag("unknown"); Text("Measured").tag("measured"); Text("Estimated").tag("estimated")
@@ -49,11 +76,27 @@ struct AddVehicleView: View {
                 .toolbar { EntryToolbar(working: working, valid: valid, cancel: { dismiss() }, save: save) }
                 .interactiveDismissDisabled(working)
                 .onAppear {
+                    guard !initialized else { return }
+                    initialized = true
                     if let vehicle {
                         name = vehicle.name; make = vehicle.make; model = vehicle.model
                         year = vehicle.year == 0 ? "" : String(vehicle.year)
                         mileage = String(vehicle.odometerMiles)
                         odometerStatus = vehicle.odometerStatus ?? "unknown"
+                        vin = vehicle.vin ?? ""; licensePlate = vehicle.licensePlate ?? ""
+                    }
+                }
+                .onChange(of: selectedPhoto) { _, item in
+                    guard let item else { return }
+                    let request = UUID(); photoRequest = request; loadingPhoto = true; error = nil
+                    Task {
+                        defer { if photoRequest == request { loadingPhoto = false } }
+                        do {
+                            guard let data = try await item.loadTransferable(type: Data.self) else { throw APIError.message("This photo could not be loaded. Try another image.") }
+                            let jpeg = try await Task.detached(priority: .userInitiated) { try VehiclePhotoData.normalizedJPEG(data) }.value
+                            guard photoRequest == request else { return }
+                            photoData = jpeg; removePhoto = false
+                        } catch { if photoRequest == request { self.error = error.localizedDescription } }
                     }
                 }
         }
@@ -63,6 +106,7 @@ struct AddVehicleView: View {
         working = true
         Task {
             do {
+                let vehicle = originalVehicle
                 var body: [String: Any] = [:]
                 let cleanName = name.trimmingCharacters(in: .whitespaces)
                 if vehicle?.name != cleanName { body["name"] = cleanName }
@@ -71,8 +115,16 @@ struct AddVehicleView: View {
                 if vehicle?.year != year { body["year"] = year }
                 if vehicle?.odometerMiles != miles { body["odometerMiles"] = miles }
                 if (vehicle?.odometerStatus ?? "unknown") != odometerStatus { body["odometerStatus"] = odometerStatus }
-                if let vehicle { if !body.isEmpty { try await store.updateVehicle(vehicle.id, values: body) } }
-                else { try await store.createVehicle(body) }
+                let cleanVIN = vin.trimmingCharacters(in: .whitespacesAndNewlines)
+                let cleanPlate = licensePlate.trimmingCharacters(in: .whitespacesAndNewlines)
+                if (vehicle?.vin ?? "") != cleanVIN { body["vin"] = cleanVIN }
+                if (vehicle?.licensePlate ?? "") != cleanPlate { body["licensePlate"] = cleanPlate }
+                if let vehicle { savedVehicleID = vehicle.id; if !body.isEmpty { try await store.updateVehicle(vehicle.id, values: body) } }
+                else { savedVehicleID = (try await store.createVehicle(body)).id }
+                if let id = vehicle?.id ?? savedVehicleID, photoData != nil || removePhoto {
+                    do { try await store.updateVehiclePhoto(id, jpeg: removePhoto ? nil : photoData) }
+                    catch { throw APIError.message("Vehicle details were saved, but the photo could not be saved. \(error.localizedDescription)") }
+                }
                 dismiss()
             } catch { self.error = error.localizedDescription }
             working = false

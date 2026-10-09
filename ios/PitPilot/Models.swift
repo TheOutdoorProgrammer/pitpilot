@@ -17,6 +17,7 @@ struct Vehicle: Codable, Identifiable, Hashable {
     var source: RecordSource?
     var odometerStatus: String?
     var odometerExcludedIntervals: Int?
+    var photoRevision: String?
     var subtitle: String { [year > 0 ? String(year) : "", make, model].filter { !$0.isEmpty }.joined(separator: " ") }
 }
 
@@ -188,6 +189,14 @@ struct Trip: Codable, Identifiable {
     var endedAt: String
     var distanceMiles: Double
     var points: [TripPoint]
+    var source: String?
+    var distanceQuality: String?
+    var recordedPointCount: Int?
+    var routeSimplified: Bool?
+    static func newestFirst(_ a: Trip, _ b: Trip) -> Bool {
+        let left = SignalFormat.date(a.startedAt) ?? .distantPast, right = SignalFormat.date(b.startedAt) ?? .distantPast
+        return left == right ? a.id > b.id : left > right
+    }
 }
 
 struct TripPoint: Codable {

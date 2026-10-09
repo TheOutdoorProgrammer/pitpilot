@@ -41,7 +41,11 @@ enum IntegrationFixture {
         }
         if route == "/api/v1/devices/fixture-device", let index = devices.firstIndex(where: { $0["id"] as? String == "fixture-device" }) {
             if method == "DELETE" { devices[index]["revokedAt"] = time(); return (204, [:]) }
-            if method == "PATCH" { devices[index]["autoUpdate"] = body["autoUpdate"]; return (200, devices[index]) }
+            if method == "PATCH" {
+                if let enabled = body["autoUpdate"] { devices[index]["autoUpdate"] = enabled }
+                if let enabled = body["gpsRecording"] { devices[index]["gpsRecording"] = enabled; devices[index]["gpsState"] = "disconnected" }
+                return (200, devices[index])
+            }
         }
         if route == "/api/v1/vehicles/test-vehicle/smartcar" {
             if ProcessInfo.processInfo.arguments.contains("--ui-testing-smartcar-unconfigured") { return (503, ["error": "smartcar is not configured"]) }

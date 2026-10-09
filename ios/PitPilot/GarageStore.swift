@@ -43,6 +43,7 @@ struct GarageCache: Codable {
     var connectionDigest: String?
     var signals: [String: LatestSignals]?
     var signalHistory: [String: SignalHistory]?
+    var locations: [String: VehicleLocationEnvelope]?
 }
 
 @MainActor
@@ -54,12 +55,19 @@ final class GarageStore: ObservableObject {
     @Published var error: String?
     @Published private(set) var signalErrors: [String: String] = [:]
     @Published private(set) var signalsRefreshing: Set<String> = []
+    @Published private(set) var locationsRefreshing: Set<String> = []
+    @Published private(set) var locationErrors: [String: String] = [:]
+    @Published private(set) var tripsPaging: Set<String> = []
+    @Published private(set) var tripsHaveMore: [String: Bool] = [:]
     private let secure = SecureConnection()
     private let cacheURL: URL
     private let session: URLSession?
     private var refreshTask: Task<[Vehicle], Error>?
     private var refreshID: UUID?
     private var signalRefreshIDs: [String: UUID] = [:]
+    private var tripRevisions: [String: UUID] = [:]
+    private var locationRevisions: [String: UUID] = [:]
+    private var disconnecting = false
 
     init() {
         session = nil
@@ -98,9 +106,9 @@ final class GarageStore: ObservableObject {
     var vehicles: [Vehicle] { cache.vehicles }
     func detail(_ id: String) -> VehicleDetail { cache.details[id] ?? VehicleDetail() }
     func signals(_ id: String) -> LatestSignals? { cache.signals?[id] }
-    private var client: APIClient? { connection.map { APIClient(connection: $0, session: session) } }
+    private var client: APIClient? { disconnecting ? nil : connection.map { APIClient(connection: $0, session: session) } }
     private func isCurrent(_ client: APIClient) -> Bool {
-        connection?.server == client.connection.server && connection?.token == client.connection.token
+        !disconnecting && connection?.server == client.connection.server && connection?.token == client.connection.token
     }
 
     func connect(server: String, token: String) async throws {
@@ -114,9 +122,13 @@ final class GarageStore: ObservableObject {
         persist()
     }
 
-    func disconnect() throws {
+    func disconnect() async throws {
+        guard !disconnecting else { return }
+        disconnecting = true
+        defer { disconnecting = false }
         // Delete cached locations before dropping the credential so failure remains recoverable.
         if FileManager.default.fileExists(atPath: cacheURL.path) { try FileManager.default.removeItem(at: cacheURL) }
+        try await VehiclePhotoCache.shared.clear()
         try secure.remove()
         connection = nil
         cache = GarageCache()
@@ -125,6 +137,8 @@ final class GarageStore: ObservableObject {
         signalErrors = [:]
         signalRefreshIDs = [:]
         signalsRefreshing = []
+        locationsRefreshing = []; locationErrors = [:]; tripsPaging = []; tripsHaveMore = [:]
+        tripRevisions = [:]; locationRevisions = [:]
     }
 
     func refresh() async {
@@ -153,6 +167,7 @@ final class GarageStore: ObservableObject {
             let ids = Set(cache.vehicles.map(\.id))
             cache.details = cache.details.filter { ids.contains($0.key) }
             cache.signals = cache.signals?.filter { ids.contains($0.key) }
+            cache.locations = cache.locations?.filter { ids.contains($0.key) }
             cache.signalHistory = cache.signalHistory?.filter { key, _ in ids.contains(String(key.split(separator: "/", maxSplits: 1).first ?? "")) }
             cache.updatedAt = Date()
             offline = false
@@ -165,14 +180,16 @@ final class GarageStore: ObservableObject {
 
     func refreshDetail(_ id: String) async {
         guard let client else { return }
+        let tripRevision = tripRevisions[id]
         do {
             async let records: [VehicleRecord] = client.request("vehicles/\(id)/records")
             async let reminders: [Reminder] = client.request("vehicles/\(id)/reminders")
             async let trips: [Trip] = client.request("vehicles/\(id)/trips")
             let detail = try await VehicleDetail(records: records, reminders: reminders, trips: trips)
             try Task.checkCancellation()
-            guard isCurrent(client) else { return }
+            guard isCurrent(client), tripRevisions[id] == tripRevision else { return }
             cache.details[id] = detail
+            tripsHaveMore[id] = detail.trips.count == 50
             cache.updatedAt = Date()
             offline = false
             error = nil
@@ -207,6 +224,64 @@ final class GarageStore: ObservableObject {
         }
     }
 
+    func refreshLocation(_ id: String) async {
+        guard !locationsRefreshing.contains(id), let client else { return }
+        let revision = locationRevisions[id]
+        locationsRefreshing.insert(id)
+        defer { locationsRefreshing.remove(id) }
+        do {
+            let response: VehicleLocationEnvelope = try await client.request("vehicles/\(id)/location")
+            try Task.checkCancellation()
+            guard isCurrent(client), locationRevisions[id] == revision else { return }
+            if cache.locations == nil { cache.locations = [:] }
+            cache.locations?[id] = response
+            locationErrors.removeValue(forKey: id)
+            persist()
+        } catch is CancellationError { }
+        catch { if isCurrent(client), locationRevisions[id] == revision { locationErrors[id] = error.localizedDescription } }
+    }
+
+    func loadMoreTrips(_ id: String) async {
+        guard !tripsPaging.contains(id), let client, let last = detail(id).trips.sorted(by: Trip.newestFirst).last else { return }
+        let revision = tripRevisions[id]
+        tripsPaging.insert(id)
+        defer { tripsPaging.remove(id) }
+        do {
+            let page: [Trip] = try await client.request("vehicles/\(id)/trips", query: [URLQueryItem(name: "limit", value: "50"), URLQueryItem(name: "before", value: last.startedAt), URLQueryItem(name: "beforeId", value: last.id)])
+            try Task.checkCancellation()
+            guard isCurrent(client), tripRevisions[id] == revision else { return }
+            var ids = Set(detail(id).trips.map(\.id))
+            cache.details[id]?.trips.append(contentsOf: page.filter { ids.insert($0.id).inserted })
+            tripsHaveMore[id] = page.count == 50
+            error = nil; persist()
+        } catch is CancellationError { }
+        catch { if isCurrent(client) { error = error.localizedDescription } }
+    }
+
+    func deleteTrip(_ trip: Trip) async throws {
+        guard let client else { throw APIError.message("Connect to your server first.") }
+        _ = try await client.send("trips/\(trip.id)", method: "DELETE")
+        guard isCurrent(client) else { throw CancellationError() }
+        tripRevisions[trip.vehicleId] = UUID()
+        locationRevisions[trip.vehicleId] = UUID()
+        cache.details[trip.vehicleId]?.trips.removeAll { $0.id == trip.id }
+        if trip.source == "pi-gps" { cache.locations?.removeValue(forKey: trip.vehicleId) }
+        persist()
+    }
+
+    func clearLocationHistory(_ vehicleID: String) async throws {
+        guard let client else { throw APIError.message("Connect to your server first.") }
+        _ = try await client.send("vehicles/\(vehicleID)/location-history", method: "DELETE")
+        guard isCurrent(client) else { throw CancellationError() }
+        tripRevisions[vehicleID] = UUID()
+        locationRevisions[vehicleID] = UUID()
+        cache.locations?.removeValue(forKey: vehicleID)
+        locationErrors.removeValue(forKey: vehicleID)
+        cache.details[vehicleID]?.trips.removeAll { $0.source == "pi-gps" }
+        persist()
+        await refreshDetail(vehicleID)
+    }
+
     func cachedSignalHistory(vehicleID: String, metric: String, statistic: String, days: Int) -> SignalHistory? {
         cache.signalHistory?[historyKey(vehicleID, metric, statistic, days)]
     }
@@ -233,12 +308,14 @@ final class GarageStore: ObservableObject {
         [vehicle, metric, statistic, String(days)].joined(separator: "/")
     }
 
-    func createVehicle(_ values: [String: Any]) async throws {
+    @discardableResult
+    func createVehicle(_ values: [String: Any]) async throws -> Vehicle {
         guard let client else { throw APIError.message("Connect to your server first.") }
         let vehicle: Vehicle = try await client.request("vehicles", method: "POST", body: APIClient.body(values))
-        guard isCurrent(client) else { return }
+        guard isCurrent(client) else { throw CancellationError() }
         cache.vehicles.append(vehicle)
         persist()
+        return vehicle
     }
 
     func updateVehicle(_ id: String, values: [String: Any]) async throws {
@@ -249,13 +326,27 @@ final class GarageStore: ObservableObject {
         persist()
     }
 
+    func updateVehiclePhoto(_ id: String, jpeg: Data?) async throws {
+        guard let client else { throw APIError.message("Connect to your server first.") }
+        let data = try await client.send("vehicles/\(id)/photo", method: jpeg == nil ? "DELETE" : "PUT", body: jpeg, contentType: "image/jpeg")
+        let vehicle = try JSONDecoder().decode(Vehicle.self, from: data)
+        guard isCurrent(client) else { throw CancellationError() }
+        try await VehiclePhotoCache.shared.remove(vehicleID: id, connection: client.connection)
+        guard isCurrent(client) else { throw CancellationError() }
+        if let index = cache.vehicles.firstIndex(where: { $0.id == id }) { cache.vehicles[index] = vehicle }
+        persist()
+    }
+
     func deleteVehicle(_ id: String) async throws {
         guard let client else { throw APIError.message("Connect to your server first.") }
         _ = try await client.send("vehicles/\(id)", method: "DELETE")
         guard isCurrent(client) else { return }
+        try await VehiclePhotoCache.shared.remove(vehicleID: id, connection: client.connection)
+        guard isCurrent(client) else { throw CancellationError() }
         cache.vehicles.removeAll { $0.id == id }
         cache.details.removeValue(forKey: id)
         cache.signals?.removeValue(forKey: id)
+        cache.locations?.removeValue(forKey: id)
         cache.signalHistory = cache.signalHistory?.filter { !$0.key.hasPrefix(id + "/") }
         signalErrors.removeValue(forKey: id)
         persist()

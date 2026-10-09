@@ -54,7 +54,7 @@ final class PitPilotUITests: XCTestCase {
         app.buttons["History"].tap()
         XCTAssertTrue(app.staticTexts["Synthetic oil service"].waitForExistence(timeout: 5))
         app.buttons["Trips"].tap()
-        XCTAssertTrue(app.staticTexts["Synthetic park loop"].waitForExistence(timeout: 5))
+        reveal(app.staticTexts["Synthetic park loop"], app)
         app.staticTexts["Synthetic park loop"].tap()
         XCTAssertTrue(app.staticTexts["4 recorded location samples"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Recorded trip route")).firstMatch.waitForExistence(timeout: 5))
@@ -85,16 +85,13 @@ final class PitPilotUITests: XCTestCase {
         app.launch()
         connect(app)
         app.staticTexts["Synthetic route truck"].tap()
-        let information = app.buttons["vehicleInformation"]
-        XCTAssertTrue(information.waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Estimated odometer")).firstMatch.exists)
-        information.tap()
         XCTAssertTrue(app.staticTexts["VIN, SYNTHETIC-VIN"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["License plate, TEST-ONLY"].exists)
         XCTAssertTrue(app.staticTexts["Synthetic region"].exists)
         XCTAssertTrue(app.staticTexts["Source record: 1"].exists)
         capture("Imported vehicle metadata", app)
-        information.tap()
+        reveal(app.buttons["History"], app)
         app.buttons["History"].tap()
         let search = app.textFields["historySearch"]
         XCTAssertTrue(search.waitForExistence(timeout: 5))
@@ -188,6 +185,7 @@ final class PitPilotUITests: XCTestCase {
         XCTAssertTrue(fuel.waitForExistence(timeout: 5))
         XCTAssertFalse(app.buttons["signal-rpm"].exists)
         if !fuel.isHittable { app.swipeUp() }
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in fuel.label.contains("daily readings") }, object: nil)], timeout: 5), .completed)
         capture("Signals overview with actual values", app)
         fuel.tap()
         XCTAssertTrue(app.descendants(matching: .any)["calendarSignalChart"].waitForExistence(timeout: 5))
@@ -201,6 +199,9 @@ final class PitPilotUITests: XCTestCase {
         capture("Fuel chart landscape", app)
         XCUIDevice.shared.orientation = .portrait
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in app.frame.width < app.frame.height }, object: nil)], timeout: 5), .completed)
+        reveal(app.staticTexts["What this measures"], app)
+        XCTAssertTrue(app.staticTexts["Fuel remaining as a percentage of tank capacity."].exists)
+        capture("Metric explanation and interpretation", app)
         app.navigationBars.buttons.element(boundBy: 0).tap()
         let manifold = app.buttons["signal-manifold_kpa"]
         for _ in 0..<4 where !manifold.isHittable { app.swipeUp() }
@@ -296,6 +297,13 @@ final class PitPilotUITests: XCTestCase {
         // SwiftUI exposes the whole labeled row as the switch; its center misses the control.
         updates.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in updates.value as? String == "0" }, object: nil)], timeout: 5), .completed)
+        let gps = app.switches["deviceGPS-fixture-device"]
+        reveal(gps, app)
+        XCTAssertEqual(gps.value as? String, "0")
+        gps.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in gps.value as? String == "1" }, object: nil)], timeout: 5), .completed)
+        reveal(app.staticTexts["GPS, GPS receiver not connected"], app)
+        capture("Pi GPS opt-in awaiting receiver", app)
         capture("Pi waiting for pairing with updates paused", app)
         app.navigationBars.buttons.element(boundBy: 0).tap()
         let integrations = app.buttons["vehicleIntegrations"]
@@ -365,11 +373,63 @@ final class PitPilotUITests: XCTestCase {
         app.launchArguments = ["--ui-testing", "--ui-testing-integrations"] + extra
         app.launch(); connect(app)
         app.staticTexts["Synthetic route truck"].tap()
+        app.buttons["garageMenu"].tap()
         let integrations = app.buttons["vehicleIntegrations"]
         XCTAssertTrue(integrations.waitForExistence(timeout: 5))
         integrations.tap()
         XCTAssertTrue(app.buttons["pairPi"].waitForExistence(timeout: 5))
         return app
+    }
+
+    func testCockpitMenuPhotoIdentityAndGPSPrivacyJourney() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-testing", "--ui-testing-cockpit"]
+        app.launch(); connect(app)
+        app.buttons["garageMenu"].tap()
+        app.buttons["menuSettings"].tap()
+        XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 5))
+        capture("Garage settings in native menu", app)
+        app.navigationBars["Settings"].buttons["Done"].tap()
+        app.navigationBars["Garage menu"].buttons["Done"].tap()
+        app.staticTexts["Synthetic route truck"].tap()
+        XCTAssertTrue(app.staticTexts["VIN, SYNTHETIC-VIN"].waitForExistence(timeout: 5))
+        capture("Vehicle photo and inline identity", app)
+        app.buttons["garageMenu"].tap()
+        app.buttons["Edit vehicle"].tap()
+        XCTAssertTrue(app.buttons["chooseVehiclePhoto"].waitForExistence(timeout: 5))
+        app.buttons["Remove photo"].tap()
+        let vin = app.textFields["vehicleVIN"]
+        reveal(vin, app); vin.tap()
+        vin.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: "SYNTHETIC-VIN".count) + "UPDATED-VIN")
+        let plate = app.textFields["vehicleLicensePlate"]
+        reveal(plate, app); plate.tap()
+        plate.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: "TEST-ONLY".count) + "NEW-PLATE")
+        capture("Editable VIN and license plate", app)
+        app.buttons["Save"].tap()
+        XCTAssertTrue(vin.waitForNonExistence(timeout: 5))
+        app.buttons["Done"].tap()
+        XCTAssertTrue(app.staticTexts["VIN, UPDATED-VIN"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["License plate, NEW-PLATE"].exists)
+        XCTAssertFalse(app.descendants(matching: .any)["vehiclePhoto"].exists)
+        reveal(app.buttons["Trips"], app); app.buttons["Trips"].tap()
+        let location = app.buttons["vehicleLocationMap"]
+        reveal(location, app)
+        XCTAssertTrue(app.staticTexts["Stale"].exists)
+        capture("Last known GPS location with explicit stale time", app)
+        location.tap()
+        XCTAssertTrue(app.navigationBars["Vehicle location"].waitForExistence(timeout: 5))
+        capture("Last known location map", app)
+        app.buttons["Done"].tap()
+        reveal(app.staticTexts["Synthetic park loop"], app); app.staticTexts["Synthetic park loop"].tap()
+        XCTAssertTrue(app.staticTexts["Estimated from GPS fixes. Separate from the odometer."].waitForExistence(timeout: 5))
+        capture("GPS route with derived distance", app)
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        app.buttons["garageMenu"].tap()
+        app.buttons["clearGPSHistory"].tap()
+        app.sheets["Delete GPS location history?"].buttons["Delete saved GPS history"].firstMatch.tap()
+        reveal(app.staticTexts["No GPS fix recorded yet"], app)
+        XCTAssertFalse(app.staticTexts["Synthetic park loop"].exists)
+        capture("Deleted GPS location history", app)
     }
 
     private func reveal(_ element: XCUIElement, _ app: XCUIApplication) {

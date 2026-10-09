@@ -1,7 +1,108 @@
 import XCTest
+import UIKit
+import ImageIO
+import UniformTypeIdentifiers
 @testable import PitPilot
 
 final class PitPilotTests: XCTestCase {
+    func testVehiclePhotoNormalizationBoundsPixelsAndStripsLocationMetadata() throws {
+        let format = UIGraphicsImageRendererFormat(); format.scale = 1
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 2400, height: 800), format: format).image { context in
+            UIColor.orange.setFill(); context.fill(CGRect(x: 0, y: 0, width: 2400, height: 800))
+        }
+        let input = NSMutableData()
+        let destination = try XCTUnwrap(CGImageDestinationCreateWithData(input as CFMutableData, UTType.jpeg.identifier as CFString, 1, nil))
+        CGImageDestinationAddImage(destination, try XCTUnwrap(image.cgImage), [
+            kCGImagePropertyGPSDictionary: [kCGImagePropertyGPSLatitude: 1.0, kCGImagePropertyGPSLatitudeRef: "N", kCGImagePropertyGPSLongitude: 2.0, kCGImagePropertyGPSLongitudeRef: "E"],
+            kCGImagePropertyTIFFDictionary: [kCGImagePropertyTIFFMake: "Synthetic private camera"]
+        ] as CFDictionary)
+        XCTAssertTrue(CGImageDestinationFinalize(destination))
+        let original = try XCTUnwrap(CGImageSourceCreateWithData(input as CFData, nil))
+        XCTAssertNotNil((CGImageSourceCopyPropertiesAtIndex(original, 0, nil) as? [CFString: Any])?[kCGImagePropertyGPSDictionary])
+        let jpeg = try VehiclePhotoData.normalizedJPEG(input as Data)
+        XCTAssertLessThanOrEqual(jpeg.count, VehiclePhotoData.maximumBytes)
+        let source = try XCTUnwrap(CGImageSourceCreateWithData(jpeg as CFData, nil))
+        XCTAssertEqual(CGImageSourceGetType(source) as String?, UTType.jpeg.identifier)
+        let properties = try XCTUnwrap(CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any])
+        XCTAssertEqual(properties[kCGImagePropertyPixelWidth] as? Int, 1600)
+        XCTAssertLessThanOrEqual(try XCTUnwrap(properties[kCGImagePropertyPixelHeight] as? Int), 1600)
+        XCTAssertNil(properties[kCGImagePropertyGPSDictionary])
+        XCTAssertNil((properties[kCGImagePropertyTIFFDictionary] as? [CFString: Any])?[kCGImagePropertyTIFFMake])
+        XCTAssertThrowsError(try VehiclePhotoData.normalizedJPEG(Data("not an image".utf8)))
+        XCTAssertThrowsError(try VehiclePhotoData.normalizedJPEG(Data(repeating: 0, count: 32 * 1024 * 1024 + 1)))
+    }
+
+    func testStateValueLabelsPreserveUnknownAndMixedSemantics() throws {
+        let labels = ["0": "Spark", "1": "Compression"]
+        XCTAssertEqual(SignalFormat.value(0, unit: "boolean", labels: labels), "Spark")
+        XCTAssertEqual(SignalFormat.value(1, unit: "boolean", labels: labels), "Compression")
+        XCTAssertEqual(SignalFormat.value(0.5, unit: "boolean", labels: labels), "Unknown")
+        XCTAssertEqual(SignalFormat.value(99, unit: "code", labels: ["2": "Closed loop"]), "Code 99")
+        let series = try JSONDecoder().decode(SignalHistorySeries.self, from: Data(#"{"source":"pi","statistic":"sample","quality":"measured","points":[{"windowStart":"2026-01-01T00:00:00Z","windowEnd":"2026-01-01T00:01:00Z","minimum":0,"maximum":0,"first":0,"last":0,"mean":0,"count":1},{"windowStart":"2026-01-01T00:02:00Z","windowEnd":"2026-01-01T00:03:00Z","minimum":0,"maximum":1,"first":0,"last":1,"mean":0.5,"count":2}]}"#.utf8))
+        let chart = SignalChartData(series: series, unit: "boolean", calendar: false, valueLabels: labels)
+        XCTAssertEqual(chart.stateMarks.map(\.label), ["Spark", "Mixed"])
+        XCTAssertTrue(chart.vertices.isEmpty)
+    }
+
+    func testGPSFixStalenessAndSourceDoNotImplyVehicleOffline() throws {
+        let envelope = try JSONDecoder().decode(VehicleLocationEnvelope.self, from: Data(#"{"location":{"latitude":1,"longitude":2,"recordedAt":"2026-01-01T00:00:00Z","source":"pi-gps","satellites":8}}"#.utf8))
+        let fix = try XCTUnwrap(envelope.location)
+        let captured = try XCTUnwrap(SignalFormat.date(fix.recordedAt))
+        XCTAssertFalse(fix.isStale(at: captured.addingTimeInterval(899)))
+        XCTAssertTrue(fix.isStale(at: captured.addingTimeInterval(901)))
+        XCTAssertNil(try JSONDecoder().decode(VehicleLocationEnvelope.self, from: Data(#"{"location":null}"#.utf8)).location)
+        XCTAssertEqual(GPSStatus.label("disconnected"), "GPS receiver not connected")
+        let points = [TripPoint(latitude: 1, longitude: 2, recordedAt: "2026-01-01T00:00:00Z"), TripPoint(latitude: 1, longitude: 2, recordedAt: "2026-01-01T00:02:01Z")]
+        XCTAssertEqual(TripSegments.split(points, maximumGap: 120).count, 2)
+    }
+
+    @MainActor
+    func testTripPagingUsesStableCursorAndDeduplicatesExistingTrips() async throws {
+        let fixture = HTTPFixture(); defer { fixture.close() }
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let trip = Trip(id: "b", vehicleId: "vehicle", title: "Synthetic", startedAt: "2026-01-01T00:00:00+01:00", endedAt: "2026-01-01T00:01:00+01:00", distanceMiles: 1, points: [])
+        let older = Trip(id: "a", vehicleId: trip.vehicleId, title: trip.title, startedAt: trip.startedAt, endedAt: trip.endedAt, distanceMiles: trip.distanceMiles, points: [])
+        var cache = GarageCache(); cache.details["vehicle"] = VehicleDetail(records: [], reminders: [], trips: [trip])
+        let store = GarageStore(connection: fixture.connection, cache: cache, cacheURL: directory.appendingPathComponent("garage.json"), session: fixture.session)
+        let reported = expectation(description: "Paging telemetry completed")
+        fixture.configure(.json(try JSONEncoder().encode([trip, older])), reported: reported)
+        await store.loadMoreTrips("vehicle")
+        await fulfillment(of: [reported], timeout: 2)
+        XCTAssertEqual(store.detail("vehicle").trips.map(\.id), ["b", "a"])
+        XCTAssertEqual(store.tripsHaveMore["vehicle"], false)
+        let query = try XCTUnwrap(URLComponents(url: try XCTUnwrap(fixture.requests.first), resolvingAgainstBaseURL: false)?.queryItems)
+        XCTAssertEqual(query.first { $0.name == "before" }?.value, trip.startedAt)
+        XCTAssertEqual(query.first { $0.name == "beforeId" }?.value, "b")
+        XCTAssertEqual(query.first { $0.name == "limit" }?.value, "50")
+    }
+
+    @MainActor
+    func testLocationFailurePreservesSavedFixWithoutMarkingGarageOffline() async throws {
+        let fixture = HTTPFixture(); defer { fixture.close() }
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        var cache = GarageCache()
+        cache.locations = ["vehicle": VehicleLocationEnvelope(location: VehicleLocation(latitude: 1, longitude: 2, recordedAt: "2026-01-01T00:00:00Z", source: "pi-gps"))]
+        let store = GarageStore(connection: fixture.connection, cache: cache, cacheURL: directory.appendingPathComponent("garage.json"), session: fixture.session)
+        let reported = expectation(description: "Location failure telemetry completed")
+        fixture.configure(.failure(.timedOut), reported: reported)
+        await store.refreshLocation("vehicle")
+        await fulfillment(of: [reported], timeout: 2)
+        XCTAssertFalse(store.offline); XCTAssertNil(store.error)
+        XCTAssertNotNil(store.locationErrors["vehicle"])
+        XCTAssertEqual(store.cache.locations?["vehicle"]?.location?.recordedAt, "2026-01-01T00:00:00Z")
+        XCTAssertTrue(store.locationsRefreshing.isEmpty)
+    }
+
+    func testPhotoAndGPSOperationsUseBoundedTelemetryNames() {
+        XCTAssertEqual(APIClient.operation(route: "vehicles/private-id/photo", method: "GET"), "vehicle.photo.get")
+        XCTAssertEqual(APIClient.operation(route: "vehicles/private-id/photo", method: "PUT"), "vehicle.photo.put")
+        XCTAssertEqual(APIClient.operation(route: "vehicles/private-id/photo", method: "DELETE"), "vehicle.photo.delete")
+        XCTAssertEqual(APIClient.operation(route: "vehicles/private-id/location", method: "GET"), "vehicle.location.get")
+        XCTAssertEqual(APIClient.operation(route: "vehicles/private-id/location-history", method: "DELETE"), "vehicle.location.delete")
+    }
+
     func testHistoryUsesCaptureTimeAcrossOffsetsAndKeepsUnknownPrecision() throws {
         var a = VehicleRecord(id: "a", vehicleId: "v", kind: .odometer, date: "2026-10-08", title: "Z actual", notes: "", odometerMiles: 101, costCents: 0)
         a.recordedAt = "2026-10-08T23:30:00-04:00"

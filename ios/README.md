@@ -27,27 +27,31 @@ swift scripts/generate-icon.swift PitPilot/Assets.xcassets/AppIcon.appiconset/Ap
 
 Enter the server's HTTPS origin and API token. URLs containing paths, embedded credentials, queries, and fragments are rejected. HTTP redirects are not followed. The connection is saved in device-only Keychain storage while the device is unlocked.
 
-The app caches loaded vehicles, records, reminders, trips, signal cards, and requested signal history in a file protected by iOS Data Protection and excluded from backups. Previously loaded information can be read offline; writes require connectivity. Disconnecting deletes the local cache and token, leaving server data intact.
+The app caches loaded vehicles, records, reminders, trips, last known locations, signal cards, and requested signal history in a file protected by iOS Data Protection and excluded from backups. Vehicle photos use a separate protected cache bound to the server, credential, vehicle, and photo revision. Previously loaded information can be read offline; writes require connectivity. Disconnecting deletes these local caches and the token, leaving server data intact.
 
-Trip maps display recorded samples. Samples over five minutes apart are disconnected, and invalid coordinates are omitted. Map tiles may require internet access. PitPilot does not request location permission or record phone location in this release.
+Trip maps display recorded samples. Native Pi GPS samples over two minutes apart are disconnected; older trip sources retain the five-minute drawing limit. Invalid coordinates are omitted. Simplified routes identify the retained sample count and may show gaps instead of inventing continuity. GPS-derived distance stays separate from the odometer. Trips load 50 at a time, with older trips available on demand. Last known location always includes its capture time and becomes stale after 15 minutes. Map tiles may require internet access. PitPilot does not request location permission or record phone location.
+
+Open the hamburger menu for Settings and vehicle integrations. The vehicle menu also contains the editor and a confirmed deletion action for native GPS history. Enable Record GPS trips for a paired Pi to collect locations from a supported USB GPS receiver; missing GPS does not imply the engine collector is disconnected. Turning recording off leaves saved history intact. Deleting location history removes saved native fixes and automatic trips, while new fixes can still arrive if recording remains enabled.
+
+The vehicle editor supports VIN, license plate, and a photo. Identity and imported metadata appear inline in the vehicle card. The system photo picker grants access only to selected images. Before upload, the app applies orientation, limits images to 1600 pixels per axis, and re-encodes JPEG under 2 MiB without copying GPS or camera metadata. The server independently validates and strips metadata. A failed photo upload keeps the successfully saved vehicle and offers retry without creating another vehicle.
 
 Network operations create W3C trace context for server correlation and emit bounded local structured logs containing method, status, and trace/span IDs. A separate authenticated request relays only an allowlisted operation name, duration, and HTTP status to the backend's client-events endpoint for Grafana traces and correlated logs. Delivery failures never block the user, and events are not queued or retried. Logs and events exclude addresses, tokens, vehicle details, form values, and coordinates. General OTLP credentials must never be placed in the app.
 
 ## Release boundaries
 
 - Reminders are visible in the app; push and local notification scheduling are not implemented.
-- Automatic Raspberry Pi and Smartcar ingestion, Pi updates, receipt attachments, and CrewChief AI remain checklist work.
+- Raspberry Pi and Smartcar integrations are available through the menu; receipt attachments and CrewChief AI remain checklist work.
 - Costs use USD, odometers use miles, and fuel quantities use US gallons in this release.
 - Signal charts display the canonical units supplied by the server, including km, km/h, kPa, Celsius, and percent. User-selectable conversions are not implemented.
 - UI tests activate a transport stub only in Debug builds with `--ui-testing`. They use separate test Keychain/cache entries. Release builds contain no fixture transport.
 
 ## Working with imported history
 
-Vehicle Overview shows only metrics with stored values. Tap fuel, manifold pressure, or another metric to choose a reading type and history range. Cards identify source, quality, and the authentic observation time or reporting period. Stale readings retain their value and gain a stale label. Daily or other period summaries remain explicitly historical.
+Vehicle Overview shows only metrics with stored values, each with a small history preview. Numeric previews use lines and fill, states use categorical marks, and counts use bars. Requests are bounded to three simultaneous history fetches and reuse protected cached history offline. Tap a card to choose a reading type and history range, inspect values, and read the server's metric description and interpretation. Cards identify source, quality, and the authentic observation time or reporting period. Stale readings retain their value and gain a stale label. Daily or other period summaries remain explicitly historical.
 
 History initially shows 30 days for recent readings, or one year when the selected reading type only has older values, so older imported snapshots are visible immediately. You can change the range using the picker. Calendar-only dates remain dates when choosing this default; they do not acquire a fabricated observation time.
 
-Numeric readings use connected lines with a subtle fill. Counts and period totals use bars; boolean values use Off/On lanes, and codes use categorical lanes. Mixed buckets remain visibly Mixed because their exact transition times are unavailable. Grouped counts and totals show the bucket average and observed range, without inventing a cumulative total. Valid zero readings remain visible.
+Numeric readings use connected lines with a subtle fill. Counts and period totals use bars; boolean values and codes use categorical lanes with names supplied by the metric catalog, falling back to Off/On or numeric codes on older servers. Mixed buckets remain visibly Mixed because their exact transition times are unavailable. Grouped counts and totals show the bucket average and observed range, without inventing a cumulative total. Valid zero readings remain visible.
 
 Charts preserve timestamped sample endpoints and bucket minimum/maximum ranges, breaking at empty buckets and long observation gaps. Date-only readings keep their calendar spacing, with breaks for missing days and no invented observation times or timezone. Each source and quality combination stays separate. Sparse date labels and a view fitted to the available data keep dense histories readable.
 

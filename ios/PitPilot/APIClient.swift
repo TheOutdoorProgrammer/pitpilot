@@ -61,7 +61,7 @@ struct APIClient {
         catch { throw APIError.message("The server returned data this app cannot read. Check that the app and server are up to date.") }
     }
 
-    func send(_ route: String, method: String = "GET", body: Data? = nil, query: [URLQueryItem] = []) async throws -> Data {
+    func send(_ route: String, method: String = "GET", body: Data? = nil, query: [URLQueryItem] = [], contentType: String = "application/json", accept: String = "application/json") async throws -> Data {
         try Task.checkCancellation()
         let started = Date()
         var statusCode = 0
@@ -78,8 +78,8 @@ struct APIClient {
         request.httpBody = body
         request.timeoutInterval = 20
         request.setValue("Bearer \(connection.token)", forHTTPHeaderField: "Authorization")
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue(contentType, forHTTPHeaderField: "Content-Type")
+        request.setValue(accept, forHTTPHeaderField: "Accept")
         let traceID = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
         let spanID = String(UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased().prefix(16))
         request.setValue("00-\(traceID)-\(spanID)-01", forHTTPHeaderField: "traceparent")
@@ -102,6 +102,7 @@ struct APIClient {
             case 401, 403: throw APIError.message("Your connection is not authorized. Check the API token in Settings.")
             case 404: throw APIError.message("This item no longer exists on the server. Refresh and try again.")
             case 409: throw APIError.message("This item changed on the server. Close this form, review the refreshed record, and try again.")
+            case 413: throw APIError.message("This photo is too large for the server. Choose a smaller image and try again.")
             case 400, 422: throw APIError.message("The server could not accept these values. Check the form and try again.")
             default: throw APIError.message("The server could not complete the request (\(response.statusCode)). Try again shortly.")
             }
@@ -142,6 +143,11 @@ struct APIClient {
             switch method { case "PATCH": return "device.update"; case "DELETE": return "device.revoke"; default: return nil }
         }
         if parts.count >= 3, parts[0] == "vehicles" {
+            if parts.count == 3, parts[2] == "location", method == "GET" { return "vehicle.location.get" }
+            if parts.count == 3, parts[2] == "location-history", method == "DELETE" { return "vehicle.location.delete" }
+            if parts.count == 3, parts[2] == "photo" {
+                switch method { case "GET": return "vehicle.photo.get"; case "PUT": return "vehicle.photo.put"; case "DELETE": return "vehicle.photo.delete"; default: return nil }
+            }
             if parts.count == 3, parts[2] == "devices" {
                 return method == "GET" ? "devices.list" : method == "POST" ? "device.create" : nil
             }

@@ -8,7 +8,7 @@ struct VehicleDetailView: View {
     private var vehicle: Vehicle { store.vehicles.first(where: { $0.id == initialVehicle.id }) ?? initialVehicle }
     init(vehicle: Vehicle) { initialVehicle = vehicle }
     @State private var selected = "Overview"
-    private enum Sheet: String, Identifiable { case record, reminder, vehicle; var id: String { rawValue } }
+    private enum Sheet: String, Identifiable { case record, reminder, vehicle, menu; var id: String { rawValue } }
     @State private var sheet: Sheet?
     @State private var confirmDeleteVehicle = false
     @State private var deleteRecord: VehicleRecord?
@@ -24,17 +24,7 @@ struct VehicleDetailView: View {
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 22) {
-                VehicleCard(vehicle: vehicle)
-                if vehicle.source != nil || vehicle.vin != nil || vehicle.licensePlate != nil || vehicle.notes != nil || !(vehicle.tags ?? []).isEmpty || !(vehicle.extraFields ?? []).isEmpty {
-                    DisclosureGroup("Vehicle details") {
-                        VStack(alignment: .leading, spacing: 10) {
-                            if let vin = vehicle.vin, !vin.isEmpty { LabeledContent("VIN", value: vin) }
-                            if let plate = vehicle.licensePlate, !plate.isEmpty { LabeledContent("License plate", value: plate) }
-                            if let notes = vehicle.notes, !notes.isEmpty { Text(notes).textSelection(.enabled) }
-                            MetadataContent(tags: vehicle.tags, fields: vehicle.extraFields, source: vehicle.source)
-                        }.font(.subheadline).fixedSize(horizontal: false, vertical: true).padding(.top, 10)
-                    }.accessibilityIdentifier("vehicleInformation").padding(16).background(PitStyle.panel, in: RoundedRectangle(cornerRadius: 16))
-                }
+                VehicleCard(vehicle: vehicle, showDetails: true)
                 if store.offline { OfflineBanner(date: store.cache.updatedAt) }
                 if let error = store.error { Text(error).font(.callout).foregroundStyle(.orange) }
                 Picker("Vehicle section", selection: $selected) {
@@ -42,21 +32,6 @@ struct VehicleDetailView: View {
                 }.pickerStyle(.segmented)
                 switch selected {
                 case "Overview":
-                    if let connection = store.connection {
-                        NavigationLink {
-                            VehicleIntegrationsView(vehicleID: vehicle.id, connection: connection)
-                        } label: {
-                            HStack(spacing: 14) {
-                                Image(systemName: "antenna.radiowaves.left.and.right").font(.title2).foregroundStyle(PitStyle.amber)
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text("Vehicle integrations").font(.headline).foregroundStyle(.primary)
-                                    Text("Pair a Pi or link Smartcar").font(.subheadline).foregroundStyle(.secondary)
-                                }
-                                Spacer()
-                                Image(systemName: "chevron.right").foregroundStyle(PitStyle.amber)
-                            }.padding(18).background(PitStyle.panel, in: RoundedRectangle(cornerRadius: 18))
-                        }.buttonStyle(.plain).accessibilityIdentifier("vehicleIntegrations")
-                    }
                     VehicleSignalsView(vehicleID: vehicle.id)
                 case "Upcoming": reminders
                 case "Trips": trips
@@ -66,6 +41,7 @@ struct VehicleDetailView: View {
         }.frame(maxWidth: .infinity).background(PitStyle.background)
             .navigationTitle(vehicle.name).navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) { Button("Open menu", systemImage: "line.3.horizontal") { sheet = .menu }.accessibilityIdentifier("garageMenu") }
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
                         Button("Log service or expense", systemImage: "wrench.and.screwdriver") { sheet = .record }
@@ -82,6 +58,7 @@ struct VehicleDetailView: View {
                 case .record: AddRecordView(vehicle: vehicle)
                 case .reminder: AddReminderView(vehicle: vehicle)
                 case .vehicle: AddVehicleView(vehicle: vehicle)
+                case .menu: GarageMenuView(vehicle: vehicle)
                 }
             }
             .sheet(item: $completingReminder) { reminder in CompleteReminderView(reminder: reminder, vehicle: vehicle) }
@@ -171,23 +148,30 @@ struct VehicleDetailView: View {
 
     private var trips: some View {
         VStack(alignment: .leading, spacing: 16) {
+            VehicleLocationView(vehicleID: vehicle.id)
             Text("Miles with a memory").font(.title3.weight(.bold))
             if detail.trips.isEmpty {
-                ContentUnavailableView("No recorded trips yet", systemImage: "map", description: Text("Trips uploaded to your server appear here. Automatic Pi and Smartcar trip collection is still on the roadmap; this app doesn't track your location."))
+                ContentUnavailableView("No recorded trips yet", systemImage: "map", description: Text("Enable Record GPS trips for your Pi and connect a supported USB GPS receiver. Routes appear after valid fixes arrive. This app does not track your phone's location."))
             }
-            ForEach(detail.trips) { trip in
+            ForEach(detail.trips.sorted(by: Trip.newestFirst)) { trip in
                 NavigationLink { TripView(trip: trip) } label: {
                     HStack {
                         Image(systemName: "point.topleft.down.to.point.bottomright.curvepath").font(.title2).foregroundStyle(PitStyle.amber)
                         VStack(alignment: .leading, spacing: 5) {
                             Text(trip.title.isEmpty ? "Recorded drive" : trip.title).font(.headline)
                             Text(String(trip.startedAt.prefix(10))).font(.caption).foregroundStyle(.secondary)
+                            if trip.distanceQuality == "derived" { Text("GPS distance estimate").font(.caption).foregroundStyle(.secondary) }
                         }
                         Spacer()
                         Text("\(trip.distanceMiles.formatted(.number.precision(.fractionLength(1)))) mi").font(.subheadline)
                         Image(systemName: "chevron.right").font(.caption).foregroundStyle(.secondary)
                     }.padding(18).background(PitStyle.panel, in: RoundedRectangle(cornerRadius: 18))
                 }.buttonStyle(.plain)
+            }
+            if store.tripsHaveMore[vehicle.id] == true {
+                Button { Task { await store.loadMoreTrips(vehicle.id) } } label: {
+                    HStack { Text("Load older trips"); if store.tripsPaging.contains(vehicle.id) { ProgressView() } }
+                }.disabled(store.offline || store.tripsPaging.contains(vehicle.id)).accessibilityIdentifier("loadOlderTrips")
             }
         }
     }
@@ -343,10 +327,15 @@ struct ReminderDetailView: View {
 }
 
 struct TripView: View {
+    @EnvironmentObject private var store: GarageStore
+    @Environment(\.dismiss) private var dismiss
+    @State private var confirmDelete = false
+    @State private var deleting = false
+    @State private var error: String?
     let trip: Trip
     private var validPoints: [TripPoint] { trip.points.filter { CLLocationCoordinate2DIsValid($0.coordinate) } }
     // Sparse samples must not be presented as a continuous observed route.
-    var segments: [[TripPoint]] { TripSegments.split(trip.points) }
+    var segments: [[TripPoint]] { TripSegments.split(trip.points, maximumGap: trip.source == "pi-gps" ? 120 : 300) }
     var body: some View {
         VStack(spacing: 0) {
             if validPoints.isEmpty {
@@ -363,15 +352,28 @@ struct TripView: View {
             }
             VStack(alignment: .leading, spacing: 8) {
                 Text("\(trip.distanceMiles.formatted(.number.precision(.fractionLength(1)))) miles").font(.system(.title, design: .rounded, weight: .bold))
-                Text("\(trip.points.count) recorded location samples").font(.subheadline)
-                Text("Lines connect recorded samples; they do not prove which road was taken. Gaps longer than five minutes are left disconnected. Map tiles may need an internet connection.").font(.caption).foregroundStyle(.secondary)
+                if trip.distanceQuality == "derived" { Text("Estimated from GPS fixes. Separate from the odometer.").font(.subheadline).foregroundStyle(PitStyle.amber) }
+                Text("\(trip.recordedPointCount ?? trip.points.count) recorded location samples").font(.subheadline)
+                if trip.routeSimplified == true { Text("The displayed route uses fewer points for performance; full fixes remain on your server.").font(.caption).foregroundStyle(.secondary) }
+                Text("Lines connect recorded samples; they do not prove which road was taken. Sparse samples remain disconnected. Map tiles may need an internet connection.").font(.caption).foregroundStyle(.secondary)
+                if let error { Text(error).font(.caption).foregroundStyle(.orange) }
             }.frame(maxWidth: .infinity, alignment: .leading).padding(20).background(PitStyle.panel)
         }.navigationTitle(trip.title.isEmpty ? "Recorded drive" : trip.title).navigationBarTitleDisplayMode(.inline)
+            .toolbar { Button("Delete trip", systemImage: "trash", role: .destructive) { confirmDelete = true }.disabled(store.offline || deleting) }
+            .confirmationDialog("Delete this trip?", isPresented: $confirmDelete, titleVisibility: .visible) {
+                Button("Delete recorded trip", role: .destructive) {
+                    deleting = true
+                    Task {
+                        do { try await store.deleteTrip(trip); dismiss() }
+                        catch { self.error = error.localizedDescription; deleting = false }
+                    }
+                }
+            } message: { Text("Removes this trip and its native GPS samples. Existing odometer readings stay unchanged.") }
     }
 }
 
 enum TripSegments {
-    static func split(_ points: [TripPoint]) -> [[TripPoint]] {
+    static func split(_ points: [TripPoint], maximumGap: TimeInterval = 300) -> [[TripPoint]] {
         var result: [[TripPoint]] = []
         let iso = ISO8601DateFormatter()
         func date(_ text: String) -> Date? {
@@ -384,7 +386,7 @@ enum TripSegments {
             guard CLLocationCoordinate2DIsValid(point.coordinate) else { continue }
             if let previous = result.last?.last,
                let before = date(previous.recordedAt), let after = date(point.recordedAt),
-               after.timeIntervalSince(before) >= 0, after.timeIntervalSince(before) <= 300 {
+               after.timeIntervalSince(before) >= 0, after.timeIntervalSince(before) <= maximumGap {
                 result[result.count - 1].append(point)
             } else { result.append([point]) }
         }

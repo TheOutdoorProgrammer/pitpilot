@@ -3,6 +3,7 @@ import UniformTypeIdentifiers
 import UIKit
 
 struct VehicleIntegrationsView: View {
+    @EnvironmentObject private var store: GarageStore
     @StateObject private var model: VehicleIntegrations
     @State private var showingPairForm = false
     @State private var deviceToRevoke: VehicleDevice?
@@ -76,6 +77,13 @@ struct VehicleIntegrationsView: View {
                             Toggle("Automatic updates", isOn: Binding(get: { device.autoUpdate }, set: { value in Task { await model.autoUpdate(device, enabled: value) } }))
                                 .disabled(model.working).accessibilityIdentifier("deviceAutoUpdate-\(device.id)")
                             Text("Allow the collector to install signed updates when it checks in. Turning this off pauses automatic installation.").font(.caption).foregroundStyle(.secondary)
+                            Toggle("Record GPS trips", isOn: Binding(get: { device.gpsRecording == true }, set: { value in Task { await model.recordGPS(device, enabled: value) } }))
+                                .disabled(model.working || store.offline).accessibilityIdentifier("deviceGPS-\(device.id)")
+                            Text("Save this vehicle's location and routes from a supported USB GPS receiver connected to the Pi. No phone location permission is needed. Turning this off stops new collection after the Pi checks in; saved routes remain.")
+                                .font(.caption).foregroundStyle(.secondary)
+                            if let state = device.gpsState {
+                                LabeledContent("GPS", value: GPSStatus.label(state))
+                            }
                             Button("Revoke access", role: .destructive) { deviceToRevoke = device }.disabled(model.working).accessibilityIdentifier("revokePi-\(device.id)")
                         }
                     }.font(.subheadline).padding(16).background(PitStyle.background.opacity(0.6), in: RoundedRectangle(cornerRadius: 16))
@@ -123,6 +131,21 @@ struct VehicleIntegrationsView: View {
                 }
             }
         }.font(.subheadline).padding(20).background(PitStyle.panel, in: RoundedRectangle(cornerRadius: 22))
+    }
+}
+
+enum GPSStatus {
+    static func label(_ state: String) -> String {
+        switch state {
+        case "disabled": "Recording off"
+        case "disconnected": "GPS receiver not connected"
+        case "waiting_clock": "Waiting for an accurate clock"
+        case "waiting_fix": "Waiting for a satellite fix"
+        case "fix": "Receiving GPS fixes"
+        case "queue_full": "Upload queue full"
+        case "paused": "Recording paused"
+        default: "Status unavailable"
+        }
     }
 }
 
