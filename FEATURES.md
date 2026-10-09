@@ -108,7 +108,7 @@ The [collector tests](internal/picollector) cover durable dual delivery, rejecte
 
 [v0.4.0](https://github.com/TheOutdoorProgrammer/pitpilot/releases/tag/v0.4.0) ships these integration foundations and [signed iOS build 13](https://fledge.theoutdoorprogrammer.com/a/com.theoutdoorprogrammer.pitpilot/9b1d5bf4c5c0). The self-hosted runner passed 39 unit tests and 10 UI journeys. Go race tests, vet and vulnerability checks passed before Quill built the GoReleaser artifacts and container. Both collector manifests and container platforms were verified. Deployed acceptance passed 27 integration checks, 18 measurement/authentication checks and 127 existing-data comparisons. All eight existing data tables were preserved, and Grafana verified correlated backend and synthetic native telemetry.
 
-Physical collector installation, real power-loss acceptance and live Smartcar authorization remain open. The current deployment leaves Smartcar disabled until the application UUID and valid OEM consent are available. Existing collectors have not been replaced.
+Physical collector installation, real power-loss acceptance and live Smartcar authorization remain open. The current deployment leaves Smartcar disabled until the application UUID and valid OEM consent are available. The old Kubernetes Smartcar sync was retired after its credentials were reused and its vehicle mapping and state were backed up. The Grinch Pi collector and receiver remain unchanged pending their handoff.
 
 ### Trip history and maps
 
