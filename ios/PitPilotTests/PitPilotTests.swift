@@ -125,9 +125,9 @@ final class PitPilotTests: XCTestCase {
         XCTAssertEqual(chart.vertices.count, 94)
         XCTAssertEqual(chart.buckets.filter { $0.calendar }.count, 89)
         XCTAssertTrue(chart.hasCalendarDays)
-        XCTAssertEqual(chart.sparseVertices.count, 10)
-        XCTAssertTrue(chart.sparseVertices.contains { $0.segment.hasPrefix("source-gap/pi/") })
-        XCTAssertTrue(chart.sparseVertices.contains { $0.segment.hasPrefix("gap/lubelogger/measured/sample/") })
+        XCTAssertEqual(chart.sparseVertices.count, 4)
+        XCTAssertFalse(chart.sparseVertices.contains { $0.segment.hasPrefix("source-gap/") })
+        XCTAssertFalse(chart.sparseVertices.contains { $0.segment.hasPrefix("gap/lubelogger/measured/sample/") })
         XCTAssertFalse(chart.sparseVertices.contains { $0.segment.hasPrefix("gap/pi/") })
         XCTAssertEqual(Set(chart.vertices.filter { $0.id.hasPrefix("pi/") }.map(\.segment)).count, 1)
         XCTAssertEqual(Set(chart.buckets.map(\.id)).count, chart.buckets.count)
@@ -157,6 +157,80 @@ final class PitPilotTests: XCTestCase {
         XCTAssertEqual(trend.axisValues.count, 1)
         XCTAssertEqual(history.displayedUnit("count"), "count")
         XCTAssertEqual(SignalChartData(history: history, statistic: "count").kind, .bars)
+    }
+
+    func testRecoveredSpeedKeepsPeriodMeansSeparateAndOnlyFillsKnownRawCoverage() throws {
+        let first = "2026-10-08T10:00:00Z", peak = "2026-10-08T10:05:00Z", last = "2026-10-08T10:09:55Z"
+        let dense = SignalHistoryPoint(bucketStart: first, bucketEnd: "2026-10-08T10:10:00Z", windowStart: first, windowEnd: last,
+            minimum: 0, maximum: 100, mean: 48, first: 0, last: 0, count: 120, firstObservedAt: first, lastObservedAt: last,
+            maxGapSeconds: 5, minimumObservedAt: first, maximumObservedAt: peak)
+        let oldLast = SignalHistoryPoint(bucketStart: "2026-10-01T00:00:00Z", bucketEnd: "2026-10-02T00:00:00Z",
+            windowStart: "2026-10-01T18:00:00Z", windowEnd: "2026-10-01T18:00:00Z", minimum: 98, maximum: 98, mean: 98, first: 98, last: 98,
+            count: 1, firstObservedAt: "2026-10-01T18:00:00Z", lastObservedAt: "2026-10-01T18:00:00Z")
+        let nextLast = SignalHistoryPoint(bucketStart: "2026-10-02T00:00:00Z", bucketEnd: "2026-10-03T00:00:00Z",
+            windowStart: "2026-10-02T18:00:00Z", windowEnd: "2026-10-02T18:00:00Z", minimum: 0, maximum: 0, mean: 0, first: 0, last: 0,
+            count: 1, firstObservedAt: "2026-10-02T18:00:00Z", lastObservedAt: "2026-10-02T18:00:00Z")
+        let averages = [72.4, 34.2].enumerated().map { index, value in
+            SignalHistoryPoint(bucketStart: "2026-10-0\(index + 1)T00:00:00Z", bucketEnd: "2026-10-0\(index + 2)T00:00:00Z",
+                windowStart: "2026-10-0\(index + 1)T00:00:00Z", windowEnd: "2026-10-0\(index + 2)T00:00:00Z",
+                minimum: value, maximum: value, mean: value, first: value, last: value, count: 1)
+        }
+        let series = [
+            SignalHistorySeries(source: "lubelogger", quality: "measured", statistic: "sample", points: [oldLast, nextLast]),
+            SignalHistorySeries(source: "lubelogger", quality: "derived", statistic: "mean", points: averages),
+            SignalHistorySeries(source: "pi", quality: "measured", statistic: "sample", points: [dense])
+        ]
+        let history = SignalHistory(metric: "speed_kph", unit: "km/h", from: "2026-10-01T00:00:00Z", to: "2026-10-09T00:00:00Z", maxPoints: 120, series: series)
+        let observed = SignalChartData(history: history, statistic: "trend")
+        XCTAssertEqual(observed.maximumJoinGapSeconds, 30)
+        XCTAssertEqual(observed.vertices.count, 5)
+        XCTAssertFalse(observed.vertices.contains { $0.value == 72.4 || $0.value == 34.2 })
+        XCTAssertTrue(observed.sparseVertices.isEmpty)
+        let old = observed.vertices.filter { $0.id.hasPrefix("lubelogger/") }
+        XCTAssertEqual(Set(old.map(\.segment)).count, 2)
+        let raw = observed.vertices.filter { $0.id.hasPrefix("pi/") }
+        XCTAssertEqual(raw.map(\.value), [0, 100, 0])
+        XCTAssertEqual(raw[1].x, try XCTUnwrap(SignalFormat.date(peak)).timeIntervalSince1970)
+        XCTAssertEqual(Set(raw.map(\.segment)).count, 1)
+        XCTAssertTrue(observed.shadesRange(try XCTUnwrap(observed.buckets.first { $0.origin?.source == "pi" })))
+        let summaries = SignalChartData(history: history, statistic: "mean")
+        XCTAssertEqual(summaries.vertices.map(\.value), [72.4, 34.2])
+        XCTAssertTrue(summaries.vertices.allSatisfy(\.summary))
+        XCTAssertEqual(Set(summaries.vertices.map(\.segment)).count, 2)
+        XCTAssertTrue(summaries.sparseVertices.isEmpty)
+        XCTAssertFalse(summaries.buckets.contains { summaries.shadesRange($0) })
+    }
+
+    func testReducedRapidHistoryWithLongOrUnknownGapsNeverFillsAcrossDays() {
+        let first = "2026-10-01T12:00:00Z", peak = "2026-10-02T12:00:00Z", last = "2026-10-03T12:00:00Z"
+        let point = SignalHistoryPoint(bucketStart: first, bucketEnd: last, windowStart: first, windowEnd: last,
+            minimum: 0, maximum: 100, mean: 30, first: 0, last: 0, count: 1500, firstObservedAt: first, lastObservedAt: last,
+            maxGapSeconds: 86400, minimumObservedAt: first, maximumObservedAt: peak)
+        for metric in ["speed_kph", "rpm", "manifold_kpa"] {
+            for hasGapMetadata in [true, false] {
+                var copy = point
+                if !hasGapMetadata { copy.maxGapSeconds = nil }
+                let series = SignalHistorySeries(source: "pi", quality: "measured", statistic: "sample", points: [copy])
+                let history = SignalHistory(metric: metric, unit: "unit", from: first, to: last, maxPoints: 120, series: [series])
+                let chart = SignalChartData(history: history, statistic: "trend")
+                XCTAssertEqual(chart.vertices.count, 3)
+                XCTAssertEqual(Set(chart.vertices.map(\.segment)).count, 3)
+                XCTAssertTrue(chart.sparseVertices.isEmpty)
+                XCTAssertFalse(chart.shadesRange(chart.buckets[0]))
+            }
+        }
+    }
+
+    func testDailySnapshotGuidesAreBoundedAndOnlyForSlowMetrics() {
+        let points = ["2026-10-01", "2026-10-04", "2026-10-20"].map { day in
+            SignalHistoryPoint(minimum: 50, maximum: 50, mean: 50, first: 50, last: 50, count: 1, calendarDate: day)
+        }
+        let source = SignalHistorySeries(source: "lubelogger", quality: "measured", statistic: "snapshot", points: points)
+        for metric in ["fuel_level_pct", "speed_kph"] {
+            let chart = SignalChartData(history: SignalHistory(metric: metric, unit: "%", from: "", to: "", maxPoints: 120, series: [source]), statistic: "trend")
+            XCTAssertEqual(chart.sparseVertices.count, metric == "fuel_level_pct" ? 2 : 0)
+            XCTAssertEqual(Set(chart.vertices.map(\.segment)).count, 3)
+        }
     }
 
     @MainActor

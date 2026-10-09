@@ -190,7 +190,7 @@ final class PitPilotUITests: XCTestCase {
         capture("Signals overview with actual values", app)
         fuel.tap()
         XCTAssertTrue(app.descendants(matching: .any)["signalHistoryChart"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.staticTexts["One timeline · squares have day precision · dotted gaps"].exists)
+        XCTAssertTrue(app.staticTexts["Observed readings · squares have day precision"].exists)
         XCTAssertFalse(app.descendants(matching: .any)["calendarSignalChart"].exists)
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@ AND label CONTAINS %@ AND label CONTAINS %@", "LubeLogger", "Smartcar", "Pi")).firstMatch.exists)
         capture("Unified fuel chart with dense calendar and timestamped sources", app)
@@ -281,6 +281,36 @@ final class PitPilotUITests: XCTestCase {
             }
             app.terminate()
         }
+    }
+
+    func testRecoveredSpeedUsesObservedReadingsAndSeparatePeriodSummaries() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-testing", "--ui-testing-signals", "--ui-testing-speed"]
+        app.launch()
+        connect(app)
+        app.staticTexts["Synthetic route truck"].tap()
+        reveal(app.buttons["signal-speed_kph"], app)
+        app.buttons["signal-speed_kph"].tap()
+        XCTAssertTrue(app.descendants(matching: .any)["signalHistoryChart"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Observed readings · gaps stay empty"].exists)
+        XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "72.4")).firstMatch.exists)
+        XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "34.2")).firstMatch.exists)
+        capture("Speed observations exclude competing daily average trajectories", app)
+        app.buttons["signalStatistic"].tap()
+        app.buttons["Period average"].tap()
+        XCTAssertTrue(app.staticTexts["Diamonds summarize periods; they are not instantaneous readings."].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "34.2")).firstMatch.exists)
+        capture("Speed period averages are explicit isolated summaries", app)
+        app.buttons["signalStatistic"].tap()
+        app.buttons["Observed readings"].tap()
+        app.segmentedControls["signalRange"].buttons["24 hours"].tap()
+        XCTAssertTrue(app.staticTexts["Observed readings · gaps stay empty"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Raspberry Pi · Measured · Reading"].waitForExistence(timeout: 5))
+        capture("Recovered speed runs preserve peaks and the collection gap", app)
+        XCUIDevice.shared.orientation = .landscapeLeft
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in app.frame.width > app.frame.height }, object: nil)], timeout: 5), .completed)
+        capture("Recovered speed detail landscape", app)
+        XCUIDevice.shared.orientation = .portrait
     }
 
     func testDiscreteStatesCodesAndCountHistory() {

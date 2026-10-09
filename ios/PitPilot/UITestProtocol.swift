@@ -138,7 +138,7 @@ final class UITestProtocol: URLProtocol {
     private static func signalDay(_ offset: Int) -> String { String(signalTime(Double(offset) * 86400).prefix(10)) }
     private static var signalLatest: [String: Any] {
         guard signals else { return ["asOf": signalTime(0), "definitions": [], "series": [], "contexts": []] }
-        return ["asOf": signalTime(0), "definitions": [
+        var result: [String: Any] = ["asOf": signalTime(0), "definitions": [
             ["metric": "fuel_level_pct", "label": "Fuel level", "unit": "%", "staleAfterSeconds": 900, "description": "Fuel remaining as a percentage of tank capacity.", "interpretation": "Slopes and movement can affect the reported level. Compare readings under similar conditions."],
             ["metric": "manifold_kpa", "label": "Manifold pressure", "unit": "kPa", "staleAfterSeconds": 900],
             ["metric": "mil_on", "label": "Malfunction indicator", "unit": "boolean", "staleAfterSeconds": 900],
@@ -159,6 +159,19 @@ final class UITestProtocol: URLProtocol {
             ["metric": "manifold_kpa", "unit": "kPa", "source": "pi", "statistic": "max", "quality": "measured", "stale": true,
              "latest": ["key": "synthetic-manifold-max", "metric": "manifold_kpa", "unit": "kPa", "statistic": "max", "quality": "measured", "value": 84, "periodStart": signalTime(-172800), "periodEnd": signalTime(-86400)]]
         ], "contexts": []]
+        if ProcessInfo.processInfo.arguments.contains("--ui-testing-speed") {
+            var definitions = result["definitions"] as! [[String: Any]]
+            definitions.append(["metric": "speed_kph", "label": "Vehicle speed", "unit": "km/h", "staleAfterSeconds": 60,
+                "description": "Instantaneous road speed reported by the vehicle.", "interpretation": "A parked reading can be zero even when an earlier driving period had a nonzero average."])
+            result["definitions"] = definitions
+            var series = result["series"] as! [[String: Any]]
+            series.append(["metric": "speed_kph", "unit": "km/h", "source": "pi", "statistic": "sample", "quality": "measured", "stale": true,
+                "latest": ["key": "synthetic-speed", "metric": "speed_kph", "unit": "km/h", "statistic": "sample", "quality": "measured", "value": 0, "observedAt": signalTime(-1800)]])
+            series.append(["metric": "speed_kph", "unit": "km/h", "source": "lubelogger", "statistic": "mean", "quality": "derived", "stale": true,
+                "latest": ["key": "synthetic-speed-mean", "metric": "speed_kph", "unit": "km/h", "statistic": "mean", "quality": "derived", "value": 34.2, "periodStart": signalTime(-4 * 86400), "periodEnd": signalTime(-3 * 86400)]])
+            result["series"] = series
+        }
+        return result
     }
 
     private static func signalHistory(_ url: URL) -> [String: Any] {
@@ -166,6 +179,7 @@ final class UITestProtocol: URLProtocol {
         func value(_ name: String) -> String { query.first { $0.name == name }?.value ?? "" }
         let metric = value("metric")
         let statistic = value("statistic")
+        if metric == "speed_kph" { return speedHistory(from: value("from"), to: value("to")) }
         let unit = ["fuel_level_pct": "%", "mil_on": "boolean", "fuel_system_1_status": "code", "retained_samples": "count"][metric] ?? "kPa"
         var response: [String: Any] = ["metric": metric, "unit": unit, "from": value("from"), "to": value("to"), "maxPoints": 120, "series": []]
         if ProcessInfo.processInfo.arguments.contains("--ui-testing-history-empty") { return response }
@@ -231,6 +245,41 @@ final class UITestProtocol: URLProtocol {
         }
         response["series"] = [["source": metric == "fuel_level_pct" ? "lubelogger" : "pi", "quality": "measured", "statistic": statistic, "unit": unit, "points": points]]
         return response
+    }
+
+    private static func speedHistory(from: String, to: String) -> [String: Any] {
+        func included(_ timestamp: String) -> Bool { timestamp >= from && timestamp < to }
+        var samples: [[String: Any]] = []
+        var averages: [[String: Any]] = []
+        for index in 0..<2 {
+            let start = signalTime(Double(-5 + index) * 86400), end = signalTime(Double(-4 + index) * 86400)
+            let at = signalTime(Double(-5 + index) * 86400 + 64800)
+            let value = index == 0 ? 98.0 : 0.0, mean = index == 0 ? 72.4 : 34.2
+            if included(at) {
+                samples.append(["bucketStart": start, "bucketEnd": end, "windowStart": at, "windowEnd": at,
+                    "minimum": value, "maximum": value, "mean": value, "first": value, "last": value, "count": 1,
+                    "firstObservedAt": at, "lastObservedAt": at, "minimumObservedAt": at, "maximumObservedAt": at, "maxGapSeconds": 0])
+            }
+            if included(start) {
+                averages.append(["bucketStart": start, "bucketEnd": end, "windowStart": start, "windowEnd": end,
+                    "minimum": mean, "maximum": mean, "mean": mean, "first": mean, "last": mean, "count": 1])
+            }
+        }
+        var recovered: [[String: Any]] = []
+        for index in 0..<32 {
+            let offset = Double(-7200 + index * 60 + (index >= 16 ? 3600 : 0))
+            let start = signalTime(offset), last = signalTime(offset + 55), peak = signalTime(offset + 25)
+            guard included(start), included(last) else { continue }
+            let maximum = Double(30 + (index % 8) * 10), first = maximum * 0.4, end = maximum * 0.2
+            recovered.append(["bucketStart": start, "bucketEnd": signalTime(offset + 60), "windowStart": start, "windowEnd": last,
+                "minimum": end, "maximum": maximum, "mean": maximum * 0.6, "first": first, "last": end, "count": 12,
+                "firstObservedAt": start, "lastObservedAt": last, "minimumObservedAt": last, "maximumObservedAt": peak, "maxGapSeconds": 5])
+        }
+        return ["metric": "speed_kph", "unit": "km/h", "from": from, "to": to, "maxPoints": 120, "series": [
+            ["source": "lubelogger", "quality": "measured", "statistic": "sample", "unit": "km/h", "points": samples],
+            ["source": "lubelogger", "quality": "derived", "statistic": "mean", "unit": "km/h", "points": averages],
+            ["source": "pi", "quality": "measured", "statistic": "sample", "unit": "km/h", "points": recovered]
+        ]]
     }
 }
 #endif
