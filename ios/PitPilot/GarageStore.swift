@@ -318,8 +318,44 @@ final class GarageStore: ObservableObject {
         cache.signals?[vehicleID]?.contexts?.removeAll { $0.source == "pi" && $0.context.location?.type == "gps" }
     }
 
-    func cachedSignalHistory(vehicleID: String, metric: String, statistic: String, days: Int) -> SignalHistory? {
-        cache.signalHistory?[historyKey(vehicleID, metric, statistic, days)]
+    func cachedSignalHistory(vehicleID: String, metric: String, statistic: String, days: Int, now: Date = Date()) -> SignalHistory? {
+        if let saved = cache.signalHistory?[historyKey(vehicleID, metric, statistic, days)] { return saved }
+        guard statistic == "all", days > 0 else { return nil }
+        let start = now.addingTimeInterval(-Double(days) * 86400)
+        let formatter = ISO8601DateFormatter()
+        let firstDay = String(formatter.string(from: start).prefix(10))
+        let lastDay = String(formatter.string(from: now).prefix(10))
+        var recovered: [SignalHistory] = []
+        // Older app versions saved each statistic separately. Reuse one range per statistic without rebucketing or writing a synthetic cache entry.
+        for kind in ["sample", "snapshot", "mean", "min", "max", "sum", "count"] {
+            for range in [365, 30, 7] where range <= days {
+                guard let saved = cache.signalHistory?[historyKey(vehicleID, metric, kind, range)], saved.metric == metric,
+                      let from = SignalFormat.date(saved.from), let to = SignalFormat.date(saved.to),
+                      from <= now, to >= start else { continue }
+                let series = saved.series.filter { $0.statistic == kind }.compactMap { source -> SignalHistorySeries? in
+                    let points = source.points.filter { point in
+                        if let day = point.calendarDate { return day >= firstDay && day <= lastDay }
+                        guard let first = (point.windowStart ?? point.firstObservedAt ?? point.bucketStart).flatMap(SignalFormat.date),
+                              let last = (point.windowEnd ?? point.lastObservedAt ?? point.bucketEnd).flatMap(SignalFormat.date) else { return false }
+                        // A partially overlapping aggregate cannot be trimmed without inventing replacement values.
+                        return first >= start && last <= now && first <= last
+                    }
+                    guard !points.isEmpty else { return nil }
+                    return SignalHistorySeries(source: source.source, quality: source.quality, statistic: source.statistic, points: points, unit: source.unit ?? saved.unit)
+                }
+                guard !series.isEmpty else { continue }
+                recovered.append(SignalHistory(metric: metric, unit: saved.unit,
+                    from: formatter.string(from: max(start, from)), to: formatter.string(from: min(now, to)),
+                    maxPoints: saved.maxPoints, series: series))
+                break
+            }
+        }
+        guard !recovered.isEmpty else { return nil }
+        let unit = cache.signals?[vehicleID]?.definition(metric)?.unit
+            ?? recovered.first(where: { $0.series.contains { $0.statistic != "count" } })?.unit
+            ?? recovered[0].unit
+        return SignalHistory(metric: metric, unit: unit, from: recovered.map(\.from).min()!, to: recovered.map(\.to).max()!,
+            maxPoints: recovered.map(\.maxPoints).max()!, series: recovered.flatMap(\.series))
     }
 
     func signalHistory(vehicleID: String, metric: String, statistic: String, days: Int) async throws -> SignalHistory {

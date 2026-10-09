@@ -40,6 +40,8 @@ History defaults to `statistic=sample`, seven days and 120 points per source, qu
 
 The native dashboard has a Customize dashboard metrics control. Show/hide choices persist per vehicle on that phone, including offline use, within its account-scoped protected cache. They do not stop collection or delete history. New metrics remain visible by default. Vehicle cards show vehicle information without import bookkeeping; imported records retain their source details.
 
+Upgrading offline can reuse older separately cached statistics in the unified chart. The app chooses at most one compatible saved range per statistic, preserves original units and provenance, and excludes out-of-range or partially overlapping timed aggregates instead of trimming their values. This read-only fallback never overwrites saved entries; a fetched unified response takes precedence.
+
 Latest sample time and staleness are distinct from the time PitPilot fetched the response. History presents one chart across LubeLogger, Pi and Smartcar sources. The default Trend combines samples, snapshots and period means visually without averaging sources or rewriting data. Other statistics such as maxima, totals and counts remain explicit choices so incompatible meanings or units do not become raw measurements. The default range widens to one year when any available source has older readings; 7-day and 30-day views remain available. Dashboard previews use the same combined data.
 
 The native app selects a chart from the measurement's unit and statistic:

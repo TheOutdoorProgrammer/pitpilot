@@ -6,6 +6,75 @@ import UniformTypeIdentifiers
 
 final class PitPilotTests: XCTestCase {
     @MainActor
+    func testOfflineUpgradeCombinesLegacyHistoryWithoutDuplicatingOrRewritingSources() throws {
+        let fixture = HTTPFixture(); defer { fixture.close() }
+        let now = try XCTUnwrap(SignalFormat.date("2026-10-09T12:00:00Z"))
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).appendingPathComponent("garage.json")
+        func saved(_ statistic: String, unit: String = "%", from: String = "2026-09-09T12:00:00Z", point: SignalHistoryPoint, maxPoints: Int = 120) -> SignalHistory {
+            SignalHistory(metric: "fuel_level_pct", unit: unit, from: from, to: "2026-10-09T12:00:00Z", maxPoints: maxPoints,
+                series: [SignalHistorySeries(source: statistic == "snapshot" ? "lubelogger" : "pi", quality: "measured", statistic: statistic, points: [point])])
+        }
+        let sample = SignalHistoryPoint(windowStart: "2026-10-08T12:00:00Z", windowEnd: "2026-10-08T12:00:30Z", minimum: 10, maximum: 20, mean: 15, first: 20, last: 10, count: 2, firstObservedAt: "2026-10-08T12:00:00Z", lastObservedAt: "2026-10-08T12:00:30Z")
+        let day = SignalHistoryPoint(minimum: 50, maximum: 50, mean: 50, first: 50, last: 50, count: 1, calendarDate: "2026-05-01", timezone: "unknown")
+        var cache = GarageCache(connectionDigest: fixture.connection.cacheIdentity)
+        cache.signalHistory = [
+            "vehicle/fuel_level_pct/sample/30": saved("sample", point: sample),
+            "vehicle/fuel_level_pct/sample/7": saved("sample", from: "2026-10-02T12:00:00Z", point: sample, maxPoints: 500),
+            "vehicle/fuel_level_pct/snapshot/365": saved("snapshot", from: "2025-10-09T12:00:00Z", point: day),
+            "vehicle/fuel_level_pct/count/30": saved("count", unit: "count", point: sample)
+        ]
+        let oldCache = try JSONDecoder().decode(GarageCache.self, from: JSONEncoder().encode(cache))
+        let store = GarageStore(connection: fixture.connection, cache: oldCache, offline: true, cacheURL: url, session: fixture.session)
+        let combined = try XCTUnwrap(store.cachedSignalHistory(vehicleID: "vehicle", metric: "fuel_level_pct", statistic: "all", days: 365, now: now))
+        XCTAssertEqual(combined.series.count, 3)
+        XCTAssertEqual(combined.series.flatMap(\.points).count, 3)
+        XCTAssertEqual(combined.unit, "%")
+        XCTAssertEqual(combined.maxPoints, 120)
+        XCTAssertEqual(combined.from, "2025-10-09T12:00:00Z")
+        XCTAssertEqual(combined.to, "2026-10-09T12:00:00Z")
+        XCTAssertEqual(combined.series.first { $0.statistic == "count" }?.unit, "count")
+        XCTAssertEqual(combined.series.first { $0.statistic == "sample" }?.points.first?.firstObservedAt, sample.firstObservedAt)
+        XCTAssertEqual(combined.series.first { $0.statistic == "snapshot" }?.points.first?.timezone, "unknown")
+        XCTAssertEqual(combined.series.first { $0.statistic == "snapshot" }?.source, "lubelogger")
+        XCTAssertNil(store.cachedSignalHistory(vehicleID: "other", metric: "fuel_level_pct", statistic: "all", days: 365, now: now))
+        XCTAssertNil(store.cachedSignalHistory(vehicleID: "vehicle", metric: "rpm", statistic: "all", days: 365, now: now))
+        let narrow = try XCTUnwrap(store.cachedSignalHistory(vehicleID: "vehicle", metric: "fuel_level_pct", statistic: "all", days: 7, now: now))
+        XCTAssertEqual(narrow.series.map(\.statistic), ["sample"])
+        XCTAssertEqual(narrow.maxPoints, 500)
+        XCTAssertEqual(store.cache.signalHistory?.count, 4)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: url.path))
+        let authoritative = SignalHistory(metric: "fuel_level_pct", unit: "%", from: "new", to: "new", maxPoints: 120, series: [])
+        cache.signalHistory?["vehicle/fuel_level_pct/all/365"] = authoritative
+        let refreshed = GarageStore(connection: fixture.connection, cache: cache, offline: true, cacheURL: url, session: fixture.session)
+        XCTAssertEqual(refreshed.cachedSignalHistory(vehicleID: "vehicle", metric: "fuel_level_pct", statistic: "all", days: 365, now: now)?.from, "new")
+        XCTAssertTrue(refreshed.cachedSignalHistory(vehicleID: "vehicle", metric: "fuel_level_pct", statistic: "all", days: 365, now: now)?.series.isEmpty == true)
+    }
+
+    @MainActor
+    func testLegacyHistoryFallbackExcludesOutsideAndPartiallyOverlappingPeriods() throws {
+        let fixture = HTTPFixture(); defer { fixture.close() }
+        let now = try XCTUnwrap(SignalFormat.date("2026-10-09T12:00:00Z"))
+        func period(_ first: String, _ last: String) -> SignalHistoryPoint {
+            SignalHistoryPoint(windowStart: first, windowEnd: last, minimum: 10, maximum: 20, mean: 15, first: 10, last: 20, count: 2)
+        }
+        let valid = period("2026-10-08T00:00:00Z", "2026-10-08T12:00:00Z")
+        let points = [valid,
+            period("2026-10-01T00:00:00Z", "2026-10-03T00:00:00Z"),
+            period("2026-10-09T00:00:00Z", "2026-10-10T00:00:00Z"),
+            period("2026-09-01T00:00:00Z", "2026-09-02T00:00:00Z")]
+        var cache = GarageCache()
+        cache.signalHistory = ["vehicle/manifold_kpa/mean/7": SignalHistory(metric: "manifold_kpa", unit: "kPa", from: "2026-10-01T12:00:00Z", to: "2026-10-08T12:00:00Z", maxPoints: 120,
+            series: [SignalHistorySeries(source: "lubelogger", quality: "measured", statistic: "mean", points: points)])]
+        let store = GarageStore(connection: fixture.connection, cache: cache, offline: true, cacheURL: URL(fileURLWithPath: "/unused"), session: fixture.session)
+        let recovered = try XCTUnwrap(store.cachedSignalHistory(vehicleID: "vehicle", metric: "manifold_kpa", statistic: "all", days: 7, now: now))
+        XCTAssertEqual(recovered.from, "2026-10-02T12:00:00Z")
+        XCTAssertEqual(recovered.to, "2026-10-08T12:00:00Z")
+        XCTAssertEqual(recovered.series.first?.points.count, 1)
+        XCTAssertEqual(recovered.series.first?.points.first?.windowStart, valid.windowStart)
+        XCTAssertEqual(store.cache.signalHistory?.values.first?.series.first?.points.count, 4)
+    }
+
+    @MainActor
     func testDashboardMetricChoicesPersistPerVehicleWithoutDroppingData() throws {
         let fixture = HTTPFixture(); defer { fixture.close() }
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
@@ -44,17 +113,23 @@ final class PitPilotTests: XCTestCase {
         }
         let historical = SignalHistorySeries(source: "lubelogger", quality: "measured", statistic: "snapshot", points: days)
         let oldSamples = SignalHistorySeries(source: "lubelogger", quality: "measured", statistic: "sample", points: [sample("2026-08-04T10:00:00Z", 20), sample("2026-08-10T10:00:00Z", 10)])
-        let pi = SignalHistorySeries(source: "pi", quality: "measured", statistic: "sample", points: [sample("2026-10-08T12:00:00Z", 60), sample("2026-10-08T12:00:30Z", 59)])
+        let piBucket = SignalHistoryPoint(bucketStart: "2026-10-08T12:00:00Z", bucketEnd: "2026-10-08T12:01:00Z",
+            windowStart: "2026-10-08T12:00:00Z", windowEnd: "2026-10-08T12:00:30Z", minimum: 59, maximum: 60, mean: 59.5,
+            first: 60, last: 59, count: 2, firstObservedAt: "2026-10-08T12:00:00Z", lastObservedAt: "2026-10-08T12:00:30Z")
+        let pi = SignalHistorySeries(source: "pi", quality: "measured", statistic: "sample", points: [piBucket])
         let smartcar = SignalHistorySeries(source: "smartcar", quality: "estimated", statistic: "sample", points: [sample("2026-10-08T12:00:00Z", 61)])
         let maximum = SignalHistorySeries(source: "lubelogger", quality: "measured", statistic: "max", points: [days[0]])
         let history = SignalHistory(metric: "fuel_level_pct", unit: "%", from: "2026-01-01T00:00:00Z", to: "2026-10-09T00:00:00Z", maxPoints: 120, series: [historical, oldSamples, pi, smartcar, maximum])
         let chart = SignalChartData(history: history, statistic: "trend")
-        XCTAssertEqual(chart.buckets.count, 94)
+        XCTAssertEqual(chart.buckets.count, 93)
         XCTAssertEqual(chart.vertices.count, 94)
         XCTAssertEqual(chart.buckets.filter { $0.calendar }.count, 89)
         XCTAssertTrue(chart.hasCalendarDays)
         XCTAssertEqual(chart.sparseVertices.count, 10)
         XCTAssertTrue(chart.sparseVertices.contains { $0.segment.hasPrefix("source-gap/pi/") })
+        XCTAssertTrue(chart.sparseVertices.contains { $0.segment.hasPrefix("gap/lubelogger/measured/sample/") })
+        XCTAssertFalse(chart.sparseVertices.contains { $0.segment.hasPrefix("gap/pi/") })
+        XCTAssertEqual(Set(chart.vertices.filter { $0.id.hasPrefix("pi/") }.map(\.segment)).count, 1)
         XCTAssertEqual(Set(chart.buckets.map(\.id)).count, chart.buckets.count)
         XCTAssertEqual(chart.yDomain(unit: "%"), 0...100)
         XCTAssertLessThanOrEqual(chart.axisValues.count, 4)
