@@ -20,10 +20,11 @@ type LatestSignalSeries struct {
 	Stale     bool              `json:"stale"`
 }
 type LatestSignals struct {
-	AsOf        time.Time             `json:"asOf"`
-	Definitions []SignalDefinition    `json:"definitions"`
-	Series      []LatestSignalSeries  `json:"series"`
-	Contexts    []StoredSignalContext `json:"contexts"`
+	HistoryRevision string                `json:"historyRevision,omitempty"`
+	AsOf            time.Time             `json:"asOf"`
+	Definitions     []SignalDefinition    `json:"definitions"`
+	Series          []LatestSignalSeries  `json:"series"`
+	Contexts        []StoredSignalContext `json:"contexts"`
 }
 
 func (s *Store) LatestSignals(ctx context.Context, vehicleID string) (out LatestSignals, err error) {
@@ -39,6 +40,12 @@ func (s *Store) LatestSignals(ctx context.Context, vehicleID string) (out Latest
 	if err = tx.QueryRowContext(ctx, "SELECT 1 FROM vehicles WHERE id=?", vehicleID).Scan(&exists); errors.Is(err, sql.ErrNoRows) {
 		return out, ErrNotFound
 	} else if err != nil {
+		return out, err
+	}
+	var discardedAt string
+	if err = tx.QueryRowContext(ctx, "SELECT discarded_at FROM legacy_signal_policies WHERE vehicle_id=?", vehicleID).Scan(&discardedAt); err == nil {
+		out.HistoryRevision = digest([]byte(discardedAt))
+	} else if !errors.Is(err, sql.ErrNoRows) {
 		return out, err
 	}
 	rows, err := tx.QueryContext(ctx, `SELECT source,data FROM (SELECT source,data,metric,statistic,quality,DENSE_RANK() OVER(PARTITION BY source,metric,statistic,quality ORDER BY sort_time DESC) rank FROM signals WHERE vehicle_id=?) WHERE rank=1 ORDER BY metric,source,statistic,quality`, vehicleID)

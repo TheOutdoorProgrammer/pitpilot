@@ -45,11 +45,28 @@ type ReceiverEventArchive struct {
 }
 
 func initializeReceiverRecovery(db *sql.DB) error {
-	_, err := db.Exec(`BEGIN; CREATE TABLE IF NOT EXISTS receiver_event_archives (
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	_, err = tx.Exec(`CREATE TABLE IF NOT EXISTS receiver_event_archives (
  device_id TEXT NOT NULL,event_id TEXT NOT NULL,vehicle_id TEXT NOT NULL REFERENCES vehicles(id) ON DELETE CASCADE,
  boot_id TEXT NOT NULL,sequence TEXT NOT NULL,backup_sha256 TEXT NOT NULL,raw TEXT NOT NULL CHECK(json_valid(raw)),projection TEXT NOT NULL CHECK(json_valid(projection)),
- PRIMARY KEY(device_id,event_id),UNIQUE(device_id,boot_id,sequence)); PRAGMA user_version=7; COMMIT;`)
-	return err
+ PRIMARY KEY(device_id,event_id),UNIQUE(device_id,boot_id,sequence));`)
+	if err != nil {
+		return err
+	}
+	var version int
+	if err = tx.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
+		return err
+	}
+	if version < 7 {
+		if _, err = tx.Exec("PRAGMA user_version=7"); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 type receiverInput struct {
@@ -259,6 +276,9 @@ func (s *Store) RecoverReceiver(ctx context.Context, request ReceiverRecoveryReq
 	receiverHash(h, duplicates)
 	state, err := loadReceiverState(ctx, tx, request.VehicleID, request.Snapshot.DeviceID, h)
 	if err != nil {
+		return report, err
+	}
+	if err = requireLegacySignalsAllowed(ctx, tx, request.VehicleID); err != nil {
 		return report, err
 	}
 	report.PreviewToken = hex.EncodeToString(h.Sum(nil))

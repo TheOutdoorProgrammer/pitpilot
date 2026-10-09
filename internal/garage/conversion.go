@@ -92,9 +92,14 @@ func (s *Store) ConvertSignalNotes(ctx context.Context, conversions []SignalNote
 			return report, e
 		}
 		batchHash := digest(batchData)
-		var oldHash, oldBatch string
-		e = tx.QueryRowContext(ctx, "SELECT original_hash,batch_hash FROM converted_signal_notes WHERE note_id=?", conversion.NoteID).Scan(&oldHash, &oldBatch)
+		var oldHash, oldBatch, oldVehicle string
+		e = tx.QueryRowContext(ctx, "SELECT original_hash,batch_hash,vehicle_id FROM converted_signal_notes WHERE note_id=?", conversion.NoteID).Scan(&oldHash, &oldBatch, &oldVehicle)
 		if e == nil {
+			if conversion.Batch.Source == "lubelogger" {
+				if e = requireLegacySignalsAllowed(ctx, tx, oldVehicle); e != nil {
+					return report, e
+				}
+			}
 			if oldHash != conversion.ExpectedHash || oldBatch != batchHash {
 				return report, ErrSignalConversionConflict
 			}

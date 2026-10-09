@@ -25,6 +25,9 @@ type ConvertedSignalNoteVersion struct {
 }
 
 func refreshConvertedSummary(ctx context.Context, tx *sql.Tx, source string, item ImportItem, sourceHash, targetHash string, replacement SignalBatch) (state []byte, err error) {
+	if err = requireLegacySignalsAllowed(ctx, tx, item.VehicleID); err != nil {
+		return nil, err
+	}
 	// A failed candidate must not affect later candidates in the same preview.
 	if _, err = tx.ExecContext(ctx, "SAVEPOINT converted_refresh"); err != nil {
 		return nil, err

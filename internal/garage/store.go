@@ -48,7 +48,7 @@ func Open(filename string) (*Store, error) {
 		db.Close()
 		return nil, err
 	}
-	if version > 7 {
+	if version > 8 {
 		db.Close()
 		return nil, errors.New("database schema is newer than this server")
 	}
@@ -109,6 +109,10 @@ func Open(filename string) (*Store, error) {
 		return nil, err
 	}
 	if err = initializeReceiverRecovery(db); err != nil {
+		db.Close()
+		return nil, err
+	}
+	if err = initializeLegacySignalPolicies(db); err != nil {
 		db.Close()
 		return nil, err
 	}
@@ -365,6 +369,7 @@ func affected(result sql.Result, err error) error {
 }
 
 type Export struct {
+	LegacySignalPolicies  []LegacySignalPolicy   `json:"legacySignalPolicies,omitempty"`
 	ReceiverEventArchives []ReceiverEventArchive `json:"receiverEventArchives,omitempty"`
 	SchemaVersion         int                    `json:"schemaVersion"`
 	ExportedAt            time.Time              `json:"exportedAt"`
@@ -494,6 +499,9 @@ func (s *Store) Export(ctx context.Context) (out Export, err error) {
 		return out, err
 	}
 	if out.ReceiverEventArchives, err = exportReceiverArchives(ctx, tx); err != nil {
+		return out, err
+	}
+	if out.LegacySignalPolicies, err = exportLegacySignalPolicies(ctx, tx); err != nil {
 		return out, err
 	}
 	return out, tx.Commit()

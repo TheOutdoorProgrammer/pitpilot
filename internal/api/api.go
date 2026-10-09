@@ -137,6 +137,10 @@ func validate(w http.ResponseWriter, err error) bool {
 }
 
 func (s *Server) failure(w http.ResponseWriter, r *http.Request, err error) {
+	if errors.Is(err, garage.ErrLegacySignalsDiscarded) {
+		fail(w, 409, "legacy signal history was discarded for this vehicle")
+		return
+	}
 	if errors.Is(err, garage.ErrNotFound) {
 		fail(w, 404, "not found")
 		return

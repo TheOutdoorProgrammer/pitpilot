@@ -130,6 +130,11 @@ func ingestSignalsTx(ctx context.Context, tx *sql.Tx, vehicleID string, batch Si
 	} else if err != nil {
 		return report, err
 	}
+	if batch.Source == "lubelogger" {
+		if err = requireLegacySignalsAllowed(ctx, tx, vehicleID); err != nil {
+			return report, err
+		}
+	}
 	payload, _ := json.Marshal(batch)
 	hash := digest(payload)
 	var oldHash string

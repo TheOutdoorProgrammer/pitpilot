@@ -20,6 +20,13 @@ var version = "dev"
 var commit = "unknown"
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "discard-legacy-signals" {
+		if err := discardLegacySignals(os.Args[2:], os.Stdout); err != nil {
+			fmt.Fprintln(os.Stderr, "pitpilot legacy signal discard:", err)
+			os.Exit(1)
+		}
+		return
+	}
 	if len(os.Args) > 1 && os.Args[1] == "recover-receiver" {
 		if err := recoverReceiver(os.Args[2:], os.Stdout); err != nil {
 			fmt.Fprintln(os.Stderr, "pitpilot receiver recovery:", err)
@@ -49,7 +56,7 @@ func main() {
 		return
 	}
 	if len(os.Args) == 2 && (os.Args[1] == "--help" || os.Args[1] == "help") {
-		fmt.Println("PitPilot vehicle journal.\n\nCommands:\n  version\n  migrate-lubelogger --help\n  convert-summary-metrics --help\n  recover-receiver --help\n  backup --help\n\nWith no command, starts the API server configured by PITPILOT_* environment variables.")
+		fmt.Println("PitPilot vehicle journal.\n\nCommands:\n  version\n  migrate-lubelogger --help\n  convert-summary-metrics --help\n  recover-receiver --help\n  discard-legacy-signals --help\n  backup --help\n\nWith no command, starts the API server configured by PITPILOT_* environment variables.")
 		return
 	}
 	if len(os.Args) == 2 && os.Args[1] == "version" {
