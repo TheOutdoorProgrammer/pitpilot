@@ -112,7 +112,7 @@ private struct VehicleLocationMap: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                Map {
+                Map(initialPosition: .region(MKCoordinateRegion(center: fix.coordinate, latitudinalMeters: 1600, longitudinalMeters: 1600))) {
                     Marker(fix.kindLabel, coordinate: fix.coordinate).tint(PitStyle.amber)
                     if let radius = fix.accuracyMeters, radius > 0 { MapCircle(center: fix.coordinate, radius: radius).foregroundStyle(PitStyle.amber.opacity(0.12)) }
                 }.mapControls { MapCompass(); MapScaleView() }
