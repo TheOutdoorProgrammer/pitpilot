@@ -403,12 +403,15 @@ final class PitPilotUITests: XCTestCase {
         // The center of a trailing-aligned field can place the cursor before its text.
         vin.coordinate(withNormalizedOffset: CGVector(dx: 0.99, dy: 0.5)).tap()
         vin.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: "SYNTHETIC-VIN".count) + "UPDATED-VIN")
-        XCTAssertEqual(vin.value as? String, "UPDATED-VIN")
+        // Keyboard events can finish after typeText returns on the release simulator.
+        expectation(for: NSPredicate(format: "value == %@", "UPDATED-VIN"), evaluatedWith: vin)
+        waitForExpectations(timeout: 5)
         let plate = app.textFields["vehicleLicensePlate"]
         reveal(plate, app)
         plate.coordinate(withNormalizedOffset: CGVector(dx: 0.99, dy: 0.5)).tap()
         plate.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: "TEST-ONLY".count) + "NEW-PLATE")
-        XCTAssertEqual(plate.value as? String, "NEW-PLATE")
+        expectation(for: NSPredicate(format: "value == %@", "NEW-PLATE"), evaluatedWith: plate)
+        waitForExpectations(timeout: 5)
         capture("Editable VIN and license plate", app)
         app.buttons["Save"].tap()
         XCTAssertTrue(vin.waitForNonExistence(timeout: 5))
