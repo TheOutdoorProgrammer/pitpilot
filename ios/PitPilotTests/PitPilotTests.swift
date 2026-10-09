@@ -5,6 +5,72 @@ import UniformTypeIdentifiers
 @testable import PitPilot
 
 final class PitPilotTests: XCTestCase {
+    func testLatestHistoryRevisionAcceptsActualOptionalWireShapes() throws {
+        for suffix in ["", ",\"historyRevision\":null", ",\"historyRevision\":\"synthetic-discard-revision\""] {
+            let payload = Data("{\"asOf\":\"2026-10-09T12:00:00Z\",\"definitions\":[],\"series\":[]\(suffix)}".utf8)
+            let latest = try JSONDecoder().decode(LatestSignals.self, from: payload)
+            XCTAssertEqual(latest.historyRevision, suffix.contains("synthetic-discard") ? "synthetic-discard-revision" : nil)
+            let saved = try JSONDecoder().decode(LatestSignals.self, from: JSONEncoder().encode(latest))
+            XCTAssertEqual(saved.historyRevision, latest.historyRevision)
+        }
+    }
+
+    @MainActor
+    func testServerHistoryRevisionInvalidatesOnlyChangedVehicleAndPreservesFreshCache() async throws {
+        for oldRevision in [nil, "synthetic-discard-revision"] as [String?] {
+            let fixture = HTTPFixture(); defer { fixture.close() }
+            let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+            defer { try? FileManager.default.removeItem(at: directory) }
+            let url = directory.appendingPathComponent("garage.json")
+            var latest = try JSONDecoder().decode(LatestSignals.self, from: signalFixture)
+            latest.historyRevision = oldRevision
+            let history = SignalHistory(metric: "fuel_level_pct", unit: "%", from: "2026-10-01T00:00:00Z", to: "2026-10-09T00:00:00Z", maxPoints: 120, series: [])
+            var cache = GarageCache()
+            cache.signals = ["vehicle": latest]
+            cache.signalHistory = ["vehicle/fuel_level_pct/all/30": history, "vehicle/fuel_level_pct/sample/365": history, "vehicle-other/fuel_level_pct/all/30": history]
+            cache.hiddenDashboardMetrics = ["vehicle": ["fuel_level_pct"]]
+            cache.details["vehicle"] = VehicleDetail(reminders: [Reminder(id: "reminder", vehicleId: "vehicle", title: "Synthetic reminder", completed: false)])
+            let store = GarageStore(connection: fixture.connection, cache: cache, cacheURL: url, session: fixture.session)
+            let updated = Data(#"{"asOf":"2026-10-09T12:00:00Z","definitions":[],"series":[],"historyRevision":"synthetic-discard-revision"}"#.utf8)
+            let reported = expectation(description: "Revision refresh telemetry completed")
+            fixture.configure(.json(updated), reported: reported)
+            await store.refreshSignals("vehicle")
+            await fulfillment(of: [reported], timeout: 3)
+            XCTAssertEqual(store.signals("vehicle")?.historyRevision, "synthetic-discard-revision")
+            XCTAssertEqual(store.cache.signalHistory?["vehicle/fuel_level_pct/all/30"] != nil, oldRevision != nil)
+            XCTAssertEqual(store.cache.signalHistory?["vehicle/fuel_level_pct/sample/365"] != nil, oldRevision != nil)
+            XCTAssertNotNil(store.cache.signalHistory?["vehicle-other/fuel_level_pct/all/30"])
+            XCTAssertEqual(store.detail("vehicle").reminders.first?.id, "reminder")
+            XCTAssertFalse(store.dashboardMetricVisible("fuel_level_pct", vehicleID: "vehicle"))
+            let saved = try JSONDecoder().decode(GarageCache.self, from: Data(contentsOf: url))
+            XCTAssertEqual(saved.signals?["vehicle"]?.historyRevision, "synthetic-discard-revision")
+            XCTAssertEqual(saved.signalHistory?.count, oldRevision == nil ? 1 : 3)
+        }
+    }
+
+    @MainActor
+    func testHistoryResponseStartedBeforeDiscardCannotRepopulateClearedCache() async throws {
+        let fixture = HTTPFixture(); defer { fixture.close() }
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        var cache = GarageCache()
+        cache.signals = ["vehicle": try JSONDecoder().decode(LatestSignals.self, from: signalFixture)]
+        let store = GarageStore(connection: fixture.connection, cache: cache, cacheURL: directory.appendingPathComponent("garage.json"), session: fixture.session)
+        let started = expectation(description: "Old history held")
+        let reported = expectation(description: "Both requests report before teardown"); reported.expectedFulfillmentCount = 2
+        fixture.configure(.hold, started: started, reported: reported)
+        let old = Task { try await store.signalHistory(vehicleID: "vehicle", metric: "fuel_level_pct", statistic: "all", days: 30) }
+        await fulfillment(of: [started], timeout: 3)
+        fixture.configure(.json(Data(#"{"asOf":"2026-10-09T12:00:00Z","definitions":[],"series":[],"historyRevision":"synthetic-discard-revision"}"#.utf8)), reported: reported)
+        await store.refreshSignals("vehicle")
+        fixture.replyHeld(route: "/api/v1/vehicles/vehicle/signals/history", data: Data(#"{"metric":"fuel_level_pct","unit":"%","from":"2026-10-01T00:00:00Z","to":"2026-10-09T00:00:00Z","maxPoints":120,"series":[]}"#.utf8))
+        do { _ = try await old.value; XCTFail("History from an earlier revision must be discarded") }
+        catch is CancellationError { }
+        await fulfillment(of: [reported], timeout: 3)
+        XCTAssertNil(store.cachedSignalHistory(vehicleID: "vehicle", metric: "fuel_level_pct", statistic: "all", days: 30))
+        XCTAssertFalse(store.offline)
+    }
+
     @MainActor
     func testTelemetryCacheUpgradeDropsHistoricalReadingsWithoutClearingGarageOrPreferences() throws {
         let fixture = HTTPFixture(); defer { fixture.close() }

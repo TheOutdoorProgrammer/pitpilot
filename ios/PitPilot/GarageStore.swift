@@ -255,6 +255,9 @@ final class GarageStore: ObservableObject {
             let response: LatestSignals = try await client.request("vehicles/\(id)/signals/latest")
             try Task.checkCancellation()
             guard isCurrent(client), signalRefreshIDs[id] == requestID else { return }
+            if cache.signals?[id]?.historyRevision != response.historyRevision {
+                cache.signalHistory = cache.signalHistory?.filter { !$0.key.hasPrefix(id + "/") }
+            }
             if cache.signals == nil { cache.signals = [:] }
             cache.signals?[id] = response
             signalErrors.removeValue(forKey: id)
@@ -380,6 +383,7 @@ final class GarageStore: ObservableObject {
     func signalHistory(vehicleID: String, metric: String, statistic: String, days: Int) async throws -> SignalHistory {
         guard let client else { throw APIError.message("Connect to your server first.") }
         let revision = vehicleRevisions[vehicleID]
+        let historyRevision = cache.signals?[vehicleID]?.historyRevision
         let end = Date()
         let start = end.addingTimeInterval(-Double(days) * 86400)
         let formatter = ISO8601DateFormatter()
@@ -389,7 +393,8 @@ final class GarageStore: ObservableObject {
             URLQueryItem(name: "maxPoints", value: "120")
         ])
         try Task.checkCancellation()
-        guard isCurrent(client), vehicleRevisions[vehicleID] == revision else { throw CancellationError() }
+        guard isCurrent(client), vehicleRevisions[vehicleID] == revision,
+              cache.signals?[vehicleID]?.historyRevision == historyRevision else { throw CancellationError() }
         if cache.signalHistory == nil { cache.signalHistory = [:] }
         cache.signalHistory?[historyKey(vehicleID, metric, statistic, days)] = response
         persist()

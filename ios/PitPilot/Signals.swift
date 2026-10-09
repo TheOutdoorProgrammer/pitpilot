@@ -54,6 +54,7 @@ struct LatestSignals: Codable {
     let definitions: [SignalDefinition]
     let series: [LatestSignal]
     var contexts: [SourcedSignalContext]?
+    var historyRevision: String?
     var metrics: [String] { Array(Set(series.map(\.metric))).sorted { label($0).localizedStandardCompare(label($1)) == .orderedAscending } }
     var dashboardMetrics: [String] {
         let featured = ["fuel_level_pct", "battery_soc_pct", "odometer_km", "adapter_voltage_v", "coolant_c", "rpm", "manifold_kpa", "speed_kph"]

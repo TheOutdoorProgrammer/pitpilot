@@ -165,7 +165,7 @@ struct SignalHistoryView: View {
     private var statistics: [String] {
         Array(Set(latest.readings(metric).map { SignalHistory.trendStatistics.contains($0.statistic) ? "trend" : $0.statistic })).sorted { ($0 == "trend" && $1 != "trend") || ($0 != "trend" && $1 != "trend" && SignalFormat.rank($0) < SignalFormat.rank($1)) }
     }
-    private var selectionKey: String { "\(days)" }
+    private var selectionKey: String { "\(days)/\(store.signals(vehicleID)?.historyRevision ?? "")" }
 
     var body: some View {
         ScrollView {
