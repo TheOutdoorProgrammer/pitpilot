@@ -15,6 +15,7 @@ import (
 
 	"github.com/TheOutdoorProgrammer/pitpilot/internal/garage"
 	"github.com/TheOutdoorProgrammer/pitpilot/internal/jsonutil"
+	"github.com/TheOutdoorProgrammer/pitpilot/internal/summarymetrics"
 )
 
 type Export struct {
@@ -42,9 +43,10 @@ type Options struct {
 	FuelUnit     string `json:"fuelUnit"`
 }
 type Request struct {
-	Options      Options `json:"options"`
-	Export       Export  `json:"export"`
-	PreviewToken string  `json:"previewToken,omitempty"`
+	RefreshConvertedSummaries bool    `json:"refreshConvertedSummaries,omitempty"`
+	Options                   Options `json:"options"`
+	Export                    Export  `json:"export"`
+	PreviewToken              string  `json:"previewToken,omitempty"`
 }
 type Summary struct {
 	Interpretation          Options        `json:"interpretation"`
@@ -245,6 +247,17 @@ func Convert(req Request) (batch garage.ImportBatch, summary Summary, err error)
 				return batch, summary, fmt.Errorf("%s document %d: %w", collection, index+1, e)
 			}
 			batch.Items = append(batch.Items, item)
+			if req.RefreshConvertedSummaries && kind == "note" {
+				var note garage.Record
+				if json.Unmarshal(item.Data, &note) == nil {
+					if signals, parseErr := summarymetrics.Parse(note); parseErr == nil {
+						if batch.ConvertedSummaries == nil {
+							batch.ConvertedSummaries = make(map[string]garage.SignalBatch)
+						}
+						batch.ConvertedSummaries[item.ID] = signals
+					}
+				}
+			}
 			if kind == "archive" {
 				summary.ArchivedDefinitions++
 				continue

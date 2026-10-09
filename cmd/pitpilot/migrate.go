@@ -36,6 +36,7 @@ func migrate(args []string, output io.Writer) (runErr error) {
 	server := f.String("server", "", "HTTPS PitPilot server URL")
 	tokenFile := f.String("token-file", os.Getenv("PITPILOT_API_TOKEN_FILE"), "file containing API token; never pass token values as arguments")
 	apply := f.String("apply", "", "apply using the exact token from a successful preview; omitted means preview only")
+	refresh := f.Bool("refresh-converted-summaries", false, "archive and reconcile changed generated summaries previously converted to signals")
 	if err := f.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return nil
@@ -60,6 +61,7 @@ func migrate(args []string, output io.Writer) (runErr error) {
 	}
 	ex, excluded := lubelogger.Sanitize(ex)
 	request := lubelogger.Request{Options: lubelogger.Options{Source: *source, Timezone: *zone, Currency: *currency, DistanceUnit: *distance, FuelUnit: *fuel}, Export: ex, PreviewToken: *apply}
+	request.RefreshConvertedSummaries = *refresh
 	batch, summary, err := lubelogger.Convert(request)
 	if err != nil {
 		return err

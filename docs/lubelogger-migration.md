@@ -80,4 +80,10 @@ Check the garage, full notes, custom fields, odometer provenance, upcoming plans
 
 There is no forced-overwrite switch. Keep source writers in place until their replacements are validated. If they continue writing, capture a fresh consistent snapshot and reconcile again before final cutover.
 
+Generated notes already converted to signals normally report `converted-summary-source-changed` when their source changes. Use `--refresh-converted-summaries` on both preview and apply to reconcile these deliberately. The API equivalent is `refreshConvertedSummaries: true` on the migration request. Keep the original source name and interpretation settings.
+
+Refresh accepts only complete summaries understood by the existing strict parser. It verifies the archived conversion and all its original signal, context and batch rows before replacing them. Modified or missing measurements, restored visible notes, vehicle changes, unsupported notes and replacement key collisions remain conflicts. Any conflict rolls back the entire import. New notes still use the separate summary-conversion preview and apply workflow.
+
+Every replaced conversion remains in an append-only version archive with its original raw LubeLogger document, projected note, normalized measurements, contexts and batch hash. Exports include these as `convertedSignalNotes[].previousVersions`. Active charts use the latest corrected summary once; prior values remain recoverable from the archive. A source reverting to earlier content creates another version. Back up before applying and compare the final export against the quiesced source snapshot before retiring LubeLogger.
+
 This migration scope does not imply complete LubeLogger feature parity. See [the checklist](../FEATURES.md) for remaining attachments, units, reports, supplies, collaboration and integration work.

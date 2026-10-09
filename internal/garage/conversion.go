@@ -27,11 +27,12 @@ type SignalConversionReport struct {
 }
 
 type ConvertedSignalNote struct {
-	NoteID      string          `json:"noteId"`
-	VehicleID   string          `json:"vehicleId"`
-	Original    json.RawMessage `json:"original"`
-	Batch       SignalBatch     `json:"batch"`
-	ConvertedAt time.Time       `json:"convertedAt"`
+	PreviousVersions []ConvertedSignalNoteVersion `json:"previousVersions,omitempty"`
+	NoteID           string                       `json:"noteId"`
+	VehicleID        string                       `json:"vehicleId"`
+	Original         json.RawMessage              `json:"original"`
+	Batch            SignalBatch                  `json:"batch"`
+	ConvertedAt      time.Time                    `json:"convertedAt"`
 }
 
 func initializeSignalConversions(db *sql.DB) error {
@@ -41,6 +42,12 @@ func initializeSignalConversions(db *sql.DB) error {
 		original_hash TEXT NOT NULL,
 		batch_hash TEXT NOT NULL,
 		data TEXT NOT NULL CHECK(json_valid(data))
+	);
+	CREATE TABLE IF NOT EXISTS converted_signal_note_versions(
+		note_id TEXT NOT NULL REFERENCES converted_signal_notes(note_id) ON DELETE CASCADE,
+		version INTEGER NOT NULL,
+		data TEXT NOT NULL CHECK(json_valid(data)),
+		PRIMARY KEY(note_id,version)
 	);`)
 	return err
 }
@@ -125,7 +132,7 @@ func (s *Store) ConvertSignalNotes(ctx context.Context, conversions []SignalNote
 		}
 		h.Write([]byte(currentHash))
 		h.Write(state)
-		archived := ConvertedSignalNote{conversion.NoteID, vehicleID, raw, conversion.Batch, time.Now().UTC()}
+		archived := ConvertedSignalNote{NoteID: conversion.NoteID, VehicleID: vehicleID, Original: raw, Batch: conversion.Batch, ConvertedAt: time.Now().UTC()}
 		data, e := json.Marshal(archived)
 		if e != nil {
 			return report, e
@@ -170,5 +177,34 @@ func exportSignalConversions(ctx context.Context, tx *sql.Tx) ([]ConvertedSignal
 		}
 		out = append(out, item)
 	}
-	return out, rows.Err()
+	if err = rows.Err(); err != nil {
+		return nil, err
+	}
+	if err = rows.Close(); err != nil {
+		return nil, err
+	}
+	for i := range out {
+		versions, e := tx.QueryContext(ctx, "SELECT data FROM converted_signal_note_versions WHERE note_id=? ORDER BY version", out[i].NoteID)
+		if e != nil {
+			return nil, e
+		}
+		for versions.Next() {
+			var raw []byte
+			var version ConvertedSignalNoteVersion
+			if e = versions.Scan(&raw); e == nil {
+				e = json.Unmarshal(raw, &version)
+			}
+			if e != nil {
+				versions.Close()
+				return nil, e
+			}
+			out[i].PreviousVersions = append(out[i].PreviousVersions, version)
+		}
+		e = versions.Err()
+		versions.Close()
+		if e != nil {
+			return nil, e
+		}
+	}
+	return out, nil
 }

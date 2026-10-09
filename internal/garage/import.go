@@ -29,9 +29,10 @@ type ImportItem struct {
 }
 
 type ImportBatch struct {
-	Source   string          `json:"source"`
-	Settings json.RawMessage `json:"settings"`
-	Items    []ImportItem    `json:"items"`
+	ConvertedSummaries map[string]SignalBatch `json:"convertedSummaries,omitempty"`
+	Source             string                 `json:"source"`
+	Settings           json.RawMessage        `json:"settings"`
+	Items              []ImportItem           `json:"items"`
 }
 
 type ImportReport struct {
@@ -169,6 +170,7 @@ func (s *Store) Import(ctx context.Context, batch ImportBatch, applyToken string
 		item                   ImportItem
 		sourceHash, targetHash string
 		create                 bool
+		converted              bool
 	}
 	var changes []mutation
 	for _, v := range batch.Items {
@@ -209,12 +211,23 @@ func (s *Store) Import(ctx context.Context, batch ImportBatch, applyToken string
 				continue
 			}
 			report.Created++
-			changes = append(changes, mutation{v, sourceHash, targetHash, true})
+			changes = append(changes, mutation{item: v, sourceHash: sourceHash, targetHash: targetHash, create: true})
 			continue
 		}
 		if oldID != v.ID || oldKind != v.Kind {
 			report.conflict(v, "identity-changed")
 			continue
+		}
+		if e == nil && v.Kind == "record" {
+			var archived int
+			archiveErr := tx.QueryRowContext(ctx, "SELECT 1 FROM converted_signal_notes WHERE note_id=?", v.ID).Scan(&archived)
+			if archiveErr == nil {
+				report.conflict(v, "converted-summary-restored")
+				continue
+			}
+			if !errors.Is(archiveErr, sql.ErrNoRows) {
+				return report, archiveErr
+			}
 		}
 		if errors.Is(e, sql.ErrNoRows) {
 			var convertedHash string
@@ -226,6 +239,17 @@ func (s *Store) Import(ctx context.Context, batch ImportBatch, applyToken string
 				h.Write([]byte("converted:" + convertedHash))
 				if sourceHash == oldSource {
 					report.Skipped++
+				} else if replacement, ok := batch.ConvertedSummaries[v.ID]; ok {
+					state, refreshErr := refreshConvertedSummary(ctx, tx, batch.Source, v, oldSource, oldTarget, replacement)
+					if errors.Is(refreshErr, ErrSignalConversionConflict) || errors.Is(refreshErr, ErrSignalConflict) {
+						report.conflict(v, "converted-summary-modified")
+					} else if refreshErr != nil {
+						return report, refreshErr
+					} else {
+						h.Write(state)
+						report.Updated++
+						changes = append(changes, mutation{item: v, sourceHash: sourceHash, targetHash: targetHash, converted: true})
+					}
 				} else {
 					report.conflict(v, "converted-summary-source-changed")
 				}
@@ -243,7 +267,7 @@ func (s *Store) Import(ctx context.Context, batch ImportBatch, applyToken string
 			continue
 		}
 		report.Updated++
-		changes = append(changes, mutation{v, sourceHash, targetHash, false})
+		changes = append(changes, mutation{item: v, sourceHash: sourceHash, targetHash: targetHash})
 	}
 	rows, err := tx.QueryContext(ctx, "SELECT target_id FROM import_sources WHERE source=? ORDER BY target_id", batch.Source)
 	if err != nil {
@@ -279,13 +303,13 @@ func (s *Store) Import(ctx context.Context, batch ImportBatch, applyToken string
 		v := change.item
 		if v.Kind == "vehicle" {
 			_, err = tx.ExecContext(ctx, "INSERT INTO vehicles(id,data) VALUES(?,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data", v.ID, string(v.Data))
-		} else if v.Kind != "archive" {
+		} else if v.Kind != "archive" && !change.converted {
 			_, err = tx.ExecContext(ctx, "INSERT INTO entries(id,vehicle_id,kind,data) VALUES(?,?,?,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data,vehicle_id=excluded.vehicle_id", v.ID, v.VehicleID, v.Kind, string(v.Data))
 		}
 		if err != nil {
 			return report, err
 		}
-		if v.Kind == "record" {
+		if v.Kind == "record" && !change.converted {
 			var record Record
 			if err = json.Unmarshal(v.Data, &record); err != nil {
 				return report, err
