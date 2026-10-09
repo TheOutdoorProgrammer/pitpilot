@@ -52,7 +52,10 @@ struct VehicleDetailView: View {
                 }
             }
             .task { await store.refreshDetail(vehicle.id) }
-            .refreshable { await store.refresh(); await store.refreshDetail(vehicle.id); await store.refreshSignals(vehicle.id) }
+            .refreshable {
+                await store.refresh(); await store.refreshDetail(vehicle.id); await store.refreshSignals(vehicle.id)
+                if selected == "Trips" { await store.refreshLocation(vehicle.id) }
+            }
             .sheet(item: $sheet) { item in
                 switch item {
                 case .record: AddRecordView(vehicle: vehicle)

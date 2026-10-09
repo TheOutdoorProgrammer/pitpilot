@@ -88,6 +88,7 @@ final class PitPilotTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: directory) }
         var cache = GarageCache()
         cache.locations = ["vehicle": VehicleLocationEnvelope(location: VehicleLocation(latitude: 1, longitude: 2, recordedAt: "2026-01-01T00:00:00Z", source: "pi-gps"))]
+        cache.details["vehicle"] = VehicleDetail(records: [VehicleRecord(id: "record", vehicleId: "vehicle", kind: .service, date: "2026-01-01", title: "Synthetic service", notes: "", odometerMiles: 100, costCents: 0)])
         let store = GarageStore(connection: fixture.connection, cache: cache, cacheURL: directory.appendingPathComponent("garage.json"), session: fixture.session)
         let reported = expectation(description: "Location failure telemetry completed")
         fixture.configure(.failure(.timedOut), reported: reported)
@@ -104,6 +105,7 @@ final class PitPilotTests: XCTestCase {
         XCTAssertFalse(store.offline); XCTAssertNil(store.error)
         XCTAssertTrue(store.locationErrors["vehicle"]?.contains("Update the PitPilot server") == true)
         XCTAssertEqual(store.cache.locations?["vehicle"]?.location?.recordedAt, "2026-01-01T00:00:00Z")
+        XCTAssertEqual(store.detail("vehicle").records.map(\.id), ["record"])
     }
 
     func testPhotoAndGPSOperationsUseBoundedTelemetryNames() {

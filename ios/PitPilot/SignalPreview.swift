@@ -25,7 +25,7 @@ struct SignalPreview: View {
     @State private var requestID = UUID()
     private var reading: LatestSignal? { latest.readings(metric).first }
     private var days: Int { latest.initialHistoryDays(metric, statistic: reading?.statistic ?? "sample") }
-    private var requestKey: String { "\(vehicleID)/\(reading?.id ?? metric)/\(reading?.latest.key ?? "")/\(days)" }
+    private var requestKey: String { "\(vehicleID)/\(reading?.id ?? metric)/\(reading?.latest.key ?? "")/\(days)/\(latest.asOf)" }
     private var series: SignalHistorySeries? {
         history?.series.first { $0.source == reading?.source && $0.statistic == reading?.statistic && $0.quality == reading?.quality }
     }
