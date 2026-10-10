@@ -265,6 +265,8 @@ func TestClientTelemetryHasStrictBoundedSchema(t *testing.T) {
 		status int
 	}{
 		{`{"operation":"vehicles.list","durationMs":15,"statusCode":200}`, 204},
+		{`{"operation":"settings.units","durationMs":0,"statusCode":200}`, 204},
+		{`{"operation":"settings.units","durationMs":0,"statusCode":200,"units":"imperial"}`, 400},
 		{`{"operation":"vehicle.create","durationMs":50,"statusCode":0}`, 204},
 		{`{"operation":"vehicles.list","durationMs":5,"statusCode":0,"failureKind":"dns"}`, 204},
 		{`{"operation":"vehicles.list","durationMs":5,"statusCode":0,"failureKind":"cancelled"}`, 422},

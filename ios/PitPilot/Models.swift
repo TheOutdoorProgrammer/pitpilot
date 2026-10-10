@@ -172,6 +172,13 @@ struct ReminderRecurrence: Codable {
         if let days { parts.append("\(days) days") }
         return "Every " + parts.joined(separator: " or ")
     }
+    func label(units: DisplayUnits) -> String {
+        var parts: [String] = []
+        if let miles { parts.append(units.formatted(miles, unit: "mi")) }
+        if let months { parts.append("\(months) months") }
+        if let days { parts.append("\(days) days") }
+        return "Every " + parts.joined(separator: " or ")
+    }
 }
 
 struct ReminderThresholds: Codable {

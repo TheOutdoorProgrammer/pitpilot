@@ -112,6 +112,7 @@ struct GarageView: View {
 }
 
 struct VehicleCard: View {
+    @AppStorage(DisplayUnits.preferenceKey) private var displayUnits: DisplayUnits = .metric
     let vehicle: Vehicle
     var showDetails = false
     var body: some View {
@@ -129,8 +130,8 @@ struct VehicleCard: View {
                 Text(vehicle.odometerStatus == "estimated" ? "Estimated odometer" : "Odometer")
                     .font(.caption.weight(.semibold)).foregroundStyle(vehicle.odometerStatus == "estimated" ? PitStyle.amber : .secondary)
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Text(vehicle.odometerMiles.formatted(.number.precision(.fractionLength(0)))).font(.system(.largeTitle, design: .rounded, weight: .heavy)).monospacedDigit().foregroundStyle(.white)
-                    Text("mi").foregroundStyle(.secondary)
+                    Text(displayUnits.value(vehicle.odometerMiles, unit: "mi").formatted(.number.precision(.fractionLength(0)))).font(.system(.largeTitle, design: .rounded, weight: .heavy)).monospacedDigit().foregroundStyle(.white)
+                    Text(displayUnits.unit("mi")).foregroundStyle(.secondary)
                     Spacer()
                     Image(systemName: "arrow.up.right").foregroundStyle(PitStyle.amber).accessibilityHidden(true)
                 }
@@ -166,6 +167,7 @@ struct OfflineBanner: View {
 }
 
 struct SettingsView: View {
+    @AppStorage(DisplayUnits.preferenceKey) private var displayUnits: DisplayUnits = .metric
     @EnvironmentObject private var store: GarageStore
     @Environment(\.dismiss) private var dismiss
     @State private var confirm = false
@@ -174,6 +176,17 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             Form {
+                Section {
+                    Picker("Display units", selection: $displayUnits) {
+                        Text("Metric").tag(DisplayUnits.metric)
+                        Text("Imperial (US)").tag(DisplayUnits.imperial)
+                    }.accessibilityIdentifier("displayUnits")
+                        .onChange(of: displayUnits) { _, _ in Task { await store.reportDisplayUnitsChange() } }
+                    Text(displayUnits == .imperial ? "Miles, mph, °F, psi, and US gallons." : "Kilometers, km/h, °C, kPa, and liters.")
+                        .font(.footnote).foregroundStyle(.secondary)
+                } header: { Text("Measurements") } footer: {
+                    Text("Applies to readings, charts, and trips on this device, including offline data. Entry forms show the units to enter.")
+                }
                 Section("Your server") {
                     Text(store.connection?.server.absoluteString ?? "Not connected").textSelection(.enabled)
                     Text("API token stored securely in Keychain").font(.footnote).foregroundStyle(.secondary)

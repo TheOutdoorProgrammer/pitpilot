@@ -186,6 +186,13 @@ struct APIClient {
         return nil
     }
 
+    func reportDisplayUnitsChange() async {
+        let traceID = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
+        let spanID = String(UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased().prefix(16))
+        Self.logger.info("display_units_changed trace_id=\(traceID, privacy: .public) span_id=\(spanID, privacy: .public)")
+        await report(operation: "settings.units", duration: 0, status: 200, failureKind: nil, traceparent: "00-\(traceID)-\(spanID)-01")
+    }
+
     private func report(operation: String, duration: Int, status: Int, failureKind: String?, traceparent: String) async {
         var request = URLRequest(url: connection.server.appendingPathComponent("api/v1/client-events"))
         request.httpMethod = "POST"

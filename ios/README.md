@@ -43,8 +43,9 @@ Network operations create W3C trace context for server correlation and emit boun
 
 - Reminders are visible in the app; push and local notification scheduling are not implemented.
 - Raspberry Pi and Smartcar integrations are available through the menu; receipt attachments and CrewChief AI remain checklist work.
-- Costs use USD, odometers use miles, and fuel quantities use US gallons in this release.
-- Signal charts display the canonical units supplied by the server, including km, km/h, kPa, Celsius, and percent. User-selectable conversions are not implemented.
+- Settings → Display units switches between Metric and Imperial (US). The choice is saved on this device and applies immediately to dashboard readings, chart axes and readouts, journal and reminder distances, fuel quantities, trips, and location accuracy, including cached data offline.
+- Imperial uses miles, mph, °F, psi, feet, and US gallons. Percentages, electrical readings, diagnostic codes, counts, and on/off states retain their meaning. Conversions change presentation only; server values, source timestamps, chart gaps, and cached data remain intact.
+- Costs use USD. Entry forms keep explicitly labeled miles and US gallons, independent of display preference, so an existing draft cannot be reinterpreted when units change.
 - UI tests activate a transport stub only in Debug builds with `--ui-testing`. They use separate test Keychain/cache entries. Release builds contain no fixture transport.
 
 ## Working with imported history

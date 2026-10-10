@@ -2,6 +2,7 @@ import SwiftUI
 import MapKit
 
 struct VehicleDetailView: View {
+    @AppStorage(DisplayUnits.preferenceKey) private var displayUnits: DisplayUnits = .metric
     @EnvironmentObject private var store: GarageStore
     @Environment(\.dismiss) private var dismiss
     private let initialVehicle: Vehicle
@@ -133,9 +134,9 @@ struct VehicleDetailView: View {
                     VStack(alignment: .leading, spacing: 5) {
                         Text(reminder.title).font(.headline).strikethrough(reminder.completed)
                         if let date = reminder.dueDate, !date.isEmpty { Text("Due \(date)").font(.subheadline).foregroundStyle(.secondary) }
-                        if let miles = reminder.dueOdometerMiles { Text("At \(miles.formatted()) mi").font(.subheadline).foregroundStyle(miles <= vehicle.odometerMiles && !reminder.completed ? PitStyle.amber : .secondary) }
+                        if let miles = reminder.dueOdometerMiles { Text("At \(displayUnits.formatted(miles, unit: "mi"))").font(.subheadline).foregroundStyle(miles <= vehicle.odometerMiles && !reminder.completed ? PitStyle.amber : .secondary) }
                         if let recurrence = reminder.recurrence {
-                            Text(recurrence.label).font(.caption).foregroundStyle(.secondary)
+                            Text(recurrence.label(units: displayUnits)).font(.caption).foregroundStyle(.secondary)
                             Text(recurrence.fixedIntervals ? "Fixed schedule" : "From completion").font(.caption).foregroundStyle(.secondary)
                         }
                         if let notes = reminder.notes, !notes.isEmpty { Text(notes).font(.caption).foregroundStyle(.secondary).textSelection(.enabled) }
@@ -166,7 +167,7 @@ struct VehicleDetailView: View {
                             if trip.distanceQuality == "derived" { Text("GPS distance estimate").font(.caption).foregroundStyle(.secondary) }
                         }
                         Spacer()
-                        Text("\(trip.distanceMiles.formatted(.number.precision(.fractionLength(1)))) mi").font(.subheadline)
+                        Text(displayUnits.formatted(trip.distanceMiles, unit: "mi")).font(.subheadline)
                         Image(systemName: "chevron.right").font(.caption).foregroundStyle(.secondary)
                     }.padding(18).background(PitStyle.panel, in: RoundedRectangle(cornerRadius: 18))
                 }.buttonStyle(.plain)
@@ -181,6 +182,7 @@ struct VehicleDetailView: View {
 }
 
 struct RecordRow: View {
+    @AppStorage(DisplayUnits.preferenceKey) private var displayUnits: DisplayUnits = .metric
     let record: VehicleRecord
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
@@ -196,7 +198,7 @@ struct RecordRow: View {
                 }
                 if !record.notes.isEmpty { Text(record.notes).font(.subheadline).foregroundStyle(.secondary).lineLimit(2) }
                 if record.kind.hasOdometer {
-                    Text("\(record.odometerMiles.formatted()) mi" + (record.kind == .odometer ? " · \(record.readingLabel)" : "")).font(.caption).foregroundStyle(.secondary)
+                    Text(displayUnits.formatted(record.odometerMiles, unit: "mi") + (record.kind == .odometer ? " · \(record.readingLabel)" : "")).font(.caption).foregroundStyle(.secondary)
                 }
                 if record.kind.hasCost {
                     Text((record.kind == .plan ? "Estimate " : "") + (Double(record.costCents) / 100).formatted(.currency(code: "USD"))).font(.subheadline.weight(.semibold))
@@ -230,6 +232,7 @@ struct MetadataContent: View {
 }
 
 struct RecordDetailView: View {
+    @AppStorage(DisplayUnits.preferenceKey) private var displayUnits: DisplayUnits = .metric
     @EnvironmentObject private var store: GarageStore
     let record: VehicleRecord
     let vehicle: Vehicle
@@ -261,15 +264,15 @@ struct RecordDetailView: View {
             }
             if current.kind.hasOdometer {
                 Section("Odometer") {
-                    if let initial = current.initialOdometerMiles { LabeledContent("Initial reading", value: "\(initial.formatted()) mi") }
-                    LabeledContent(current.kind == .odometer ? "Final reading" : "Reading", value: "\(current.odometerMiles.formatted()) mi")
+                    if let initial = current.initialOdometerMiles { LabeledContent("Initial reading", value: displayUnits.formatted(initial, unit: "mi")) }
+                    LabeledContent(current.kind == .odometer ? "Final reading" : "Reading", value: displayUnits.formatted(current.odometerMiles, unit: "mi"))
                     if current.kind == .odometer { Text(current.readingLabel).foregroundStyle(current.odometerStatus == "estimated" ? PitStyle.amber : .secondary) }
                 }
             }
             if current.kind.hasCost {
                 Section(current.kind == .plan ? "Estimate" : "Cost") {
                     LabeledContent("USD", value: (Double(current.costCents) / 100).formatted(.currency(code: "USD")))
-                    if let gallons = current.gallons { LabeledContent("US gallons", value: gallons.formatted()) }
+                    if let gallons = current.gallons { LabeledContent("Fuel quantity", value: displayUnits.formatted(gallons, unit: "gal")) }
                     if let fuel = current.fuel {
                         LabeledContent("Filled to full", value: fuel.fillToFull ? "Yes" : "No")
                         LabeledContent("Previous fill missed", value: fuel.missedFill ? "Yes" : "No")
@@ -289,6 +292,7 @@ struct RecordDetailView: View {
 }
 
 struct ReminderDetailView: View {
+    @AppStorage(DisplayUnits.preferenceKey) private var displayUnits: DisplayUnits = .metric
     @EnvironmentObject private var store: GarageStore
     let reminder: Reminder
     let vehicle: Vehicle
@@ -300,9 +304,9 @@ struct ReminderDetailView: View {
             Section {
                 Text(current.title).font(.title2.weight(.bold))
                 if let due = current.dueDate { LabeledContent("Due date", value: due) }
-                if let miles = current.dueOdometerMiles { LabeledContent("Due reading", value: "\(miles.formatted()) mi") }
+                if let miles = current.dueOdometerMiles { LabeledContent("Due reading", value: displayUnits.formatted(miles, unit: "mi")) }
                 if let recurrence = current.recurrence {
-                    Text(recurrence.label)
+                    Text(recurrence.label(units: displayUnits))
                     Text(recurrence.fixedIntervals ? "Each completion advances the original schedule by one interval. An overdue reminder may still be due afterward." : "Each completion schedules the next reminder from the date and reading you enter.").font(.footnote).foregroundStyle(.secondary)
                 }
                 Button(current.completed ? "Mark incomplete" : "Complete reminder") {
@@ -316,8 +320,8 @@ struct ReminderDetailView: View {
                 Section("Advance warning") {
                     if let value = thresholds.urgentDays { LabeledContent("Urgent within", value: "\(value) days") }
                     if let value = thresholds.veryUrgentDays { LabeledContent("Very urgent within", value: "\(value) days") }
-                    if let value = thresholds.urgentMiles { LabeledContent("Urgent within", value: "\(value.formatted()) mi") }
-                    if let value = thresholds.veryUrgentMiles { LabeledContent("Very urgent within", value: "\(value.formatted()) mi") }
+                    if let value = thresholds.urgentMiles { LabeledContent("Urgent within", value: displayUnits.formatted(value, unit: "mi")) }
+                    if let value = thresholds.veryUrgentMiles { LabeledContent("Very urgent within", value: displayUnits.formatted(value, unit: "mi")) }
                 }
             }
             if let error = store.error { Text(error).foregroundStyle(.orange) }
@@ -330,6 +334,7 @@ struct ReminderDetailView: View {
 }
 
 struct TripView: View {
+    @AppStorage(DisplayUnits.preferenceKey) private var displayUnits: DisplayUnits = .metric
     @EnvironmentObject private var store: GarageStore
     @Environment(\.dismiss) private var dismiss
     @State private var confirmDelete = false
@@ -354,7 +359,7 @@ struct TripView: View {
                 }.mapControls { MapCompass(); MapScaleView() }.accessibilityLabel("Recorded trip route")
             }
             VStack(alignment: .leading, spacing: 8) {
-                Text("\(trip.distanceMiles.formatted(.number.precision(.fractionLength(1)))) miles").font(.system(.title, design: .rounded, weight: .bold))
+                Text(displayUnits.formatted(trip.distanceMiles, unit: "mi")).font(.system(.title, design: .rounded, weight: .bold))
                 if trip.distanceQuality == "derived" { Text("Estimated from GPS fixes. Separate from the odometer.").font(.subheadline).foregroundStyle(PitStyle.amber) }
                 Text("\(trip.recordedPointCount ?? trip.points.count) recorded location samples").font(.subheadline)
                 if trip.routeSimplified == true { Text("The displayed route uses fewer points for performance; full fixes remain on your server.").font(.caption).foregroundStyle(.secondary) }

@@ -103,6 +103,7 @@ final class GarageStore: ObservableObject {
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("--ui-testing"),
            !ProcessInfo.processInfo.arguments.contains("--ui-testing-preserve-cache") {
+            UserDefaults.standard.removeObject(forKey: DisplayUnits.preferenceKey)
             connection = nil
             cache = GarageCache()
             offline = false
@@ -128,6 +129,11 @@ final class GarageStore: ObservableObject {
     var vehicles: [Vehicle] { cache.vehicles }
     func detail(_ id: String) -> VehicleDetail { cache.details[id] ?? VehicleDetail() }
     func signals(_ id: String) -> LatestSignals? { cache.signals?[id] }
+
+    func reportDisplayUnitsChange() async {
+        guard !offline, let client else { return }
+        await client.reportDisplayUnitsChange()
+    }
 
     func dashboardMetricVisible(_ metric: String, vehicleID: String) -> Bool {
         !(cache.hiddenDashboardMetrics?[vehicleID]?.contains(metric) ?? false)

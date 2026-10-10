@@ -107,6 +107,7 @@ private struct VehicleLocationSummary: View {
 }
 
 private struct VehicleLocationMap: View {
+    @AppStorage(DisplayUnits.preferenceKey) private var displayUnits: DisplayUnits = .metric
     @Environment(\.dismiss) private var dismiss
     let fix: VehicleLocation
     var body: some View {
@@ -119,7 +120,7 @@ private struct VehicleLocationMap: View {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Last known location").font(.headline)
                     VehicleLocationSummary(fix: fix)
-                    if let accuracy = fix.accuracyMeters { Text("Reported accuracy: \(accuracy.formatted(.number.precision(.fractionLength(0)))) m") }
+                    if let accuracy = fix.accuracyMeters { Text("Reported accuracy: \(displayUnits.formatted(accuracy, unit: "m"))") }
                     Text("Map tiles require an internet connection.").font(.caption).foregroundStyle(.secondary)
                 }.frame(maxWidth: .infinity, alignment: .leading).padding(20).background(PitStyle.panel)
             }.navigationTitle("Vehicle location").navigationBarTitleDisplayMode(.inline)

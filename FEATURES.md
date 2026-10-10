@@ -84,6 +84,7 @@ Deployed acceptance passed odometer calibration and replay checks, authenticated
 - [ ] Capture receipts and documents with the camera or file picker and attach them to records.
 - [ ] Deliver configurable maintenance and integration notifications without repeated alert noise.
 - [ ] Support accessibility, dynamic text, preferred units, local dates, and time zones.
+- [x] Choose persistent Metric or Imperial (US) display units for dashboard readings, graphs, records, reminders, and trips, including offline data, without changing stored measurements.
 
 ### Native vehicle measurements
 
