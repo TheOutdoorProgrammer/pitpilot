@@ -1,7 +1,15 @@
 import XCTest
 
 final class PitPilotUITests: XCTestCase {
-    override func setUpWithError() throws { continueAfterFailure = false }
+    override func setUpWithError() throws {
+        continueAfterFailure = false
+        addUIInterruptionMonitor(withDescription: "Dismiss password saving for synthetic credentials") { interruption in
+            guard interruption.staticTexts["Save Password?"].exists,
+                  interruption.buttons["Not Now"].exists else { return false }
+            interruption.buttons["Not Now"].tap()
+            return true
+        }
+    }
     func testConnectionValidationAndGarageJourney() {
         let app = XCUIApplication()
         app.launchArguments = ["--ui-testing"]
@@ -628,11 +636,16 @@ final class PitPilotUITests: XCTestCase {
         button.tap()
         XCTAssertTrue(app.navigationBars.buttons["Add vehicle"].waitForExistence(timeout: 5))
         let passwordService = XCUIApplication(bundleIdentifier: "com.apple.SafariViewService")
-        if passwordService.buttons["Not Now"].waitForExistence(timeout: 3) {
+        // The password service can present after the garage already appears in accessibility.
+        if passwordService.buttons["Not Now"].waitForExistence(timeout: 10) {
             passwordService.buttons["Not Now"].tap()
             XCTAssertTrue(passwordService.buttons["Not Now"].waitForNonExistence(timeout: 5))
             app.activate()
         }
+        let menu = app.buttons["garageMenu"]
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "isHittable == true"), object: menu
+        )], timeout: 5), .completed)
     }
     private func capture(_ name: String, _ app: XCUIApplication) {
         let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
