@@ -43,6 +43,10 @@ struct LatestSignal: Codable, Identifiable {
     let latest: SignalObservation
     let stale: Bool
     var id: String { [metric, source, statistic, quality].joined(separator: "/") }
+    func formattedValue(in units: DisplayUnits, labels: [String: String]? = nil) -> String {
+        units.formatted(latest.value, unit: statistic == "count" ? "count" : unit,
+                        labels: statistic == "count" ? nil : labels)
+    }
     func isStale(at now: Date, definition: SignalDefinition?) -> Bool {
         guard statistic == "sample", let date = latest.referenceDate, let definition else { return true }
         return stale || now.timeIntervalSince(date) > Double(definition.staleAfterSeconds)
@@ -108,6 +112,16 @@ struct SignalHistory: Codable {
         series.filter { statistic == "trend" ? Self.trendStatistics.contains($0.statistic) : $0.statistic == statistic }
     }
     func displayedUnit(_ statistic: String) -> String { statistic == "count" ? "count" : unit }
+
+    // Project a copy at the view boundary. Stored readings and offline caches keep their source units.
+    func displayed(in units: DisplayUnits) -> SignalHistory {
+        SignalHistory(metric: metric, unit: units.unit(unit), from: from, to: to, maxPoints: maxPoints,
+            series: series.map { series in
+                let sourceUnit = series.statistic == "count" ? "count" : series.unit ?? unit
+                return SignalHistorySeries(source: series.source, quality: series.quality, statistic: series.statistic,
+                    points: series.points.map { $0.displayed(in: units, unit: sourceUnit) }, unit: units.unit(sourceUnit))
+            })
+    }
 }
 
 struct SignalHistorySeries: Codable, Identifiable {
@@ -136,6 +150,14 @@ struct SignalHistoryPoint: Codable, Identifiable {
     var calendarDate: String?
     var timezone: String?
     var id: String { calendarDate ?? bucketStart ?? "unknown" }
+
+    func displayed(in units: DisplayUnits, unit: String) -> SignalHistoryPoint {
+        SignalHistoryPoint(bucketStart: bucketStart, bucketEnd: bucketEnd, windowStart: windowStart, windowEnd: windowEnd,
+            minimum: units.value(minimum, unit: unit), maximum: units.value(maximum, unit: unit),
+            mean: units.value(mean, unit: unit), first: units.value(first, unit: unit), last: units.value(last, unit: unit),
+            count: count, firstObservedAt: firstObservedAt, lastObservedAt: lastObservedAt,
+            calendarDate: calendarDate, timezone: timezone)
+    }
 }
 
 enum SignalChartKind: Equatable {

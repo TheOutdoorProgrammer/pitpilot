@@ -16,6 +16,7 @@ actor SignalPreviewGate {
 
 struct SignalPreview: View {
     @EnvironmentObject private var store: GarageStore
+    @AppStorage(DisplayUnits.preferenceKey) private var displayUnits: DisplayUnits = .metric
     let vehicleID: String
     let metric: String
     let latest: LatestSignals
@@ -31,9 +32,10 @@ struct SignalPreview: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             if let history {
-                let data = SignalChartData(history: history, statistic: statistic, valueLabels: latest.definition(metric)?.valueLabels)
+                let displayed = history.displayed(in: displayUnits)
+                let data = SignalChartData(history: displayed, statistic: statistic, valueLabels: latest.definition(metric)?.valueLabels)
                 if !data.buckets.isEmpty {
-                    SignalMiniChart(data: data, unit: history.displayedUnit(statistic), estimated: reading?.quality == "estimated")
+                    SignalMiniChart(data: data, unit: displayed.displayedUnit(statistic), estimated: reading?.quality == "estimated")
                         .accessibilityLabel("\(latest.label(metric)) history preview")
                         .accessibilityIdentifier("preview-\(metric)")
                     Text("\(days == 365 ? "1 year" : "\(days) days") · all sources")

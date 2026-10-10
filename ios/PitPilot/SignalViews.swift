@@ -91,6 +91,7 @@ private struct DashboardMetricsView: View {
 }
 
 private struct SignalCard: View {
+    @AppStorage(DisplayUnits.preferenceKey) private var displayUnits: DisplayUnits = .metric
     let vehicleID: String
     let metric: String
     let latest: LatestSignals
@@ -107,7 +108,7 @@ private struct SignalCard: View {
                 VStack(alignment: .leading, spacing: 5) {
                     Text(reading.latest.calendarDate == nil ? SignalFormat.statistic(reading.statistic) : "Daily \(SignalFormat.statistic(reading.statistic).lowercased())")
                         .font(.caption.weight(.semibold)).foregroundStyle(PitStyle.amber)
-                    Text(SignalFormat.value(reading.latest.value, unit: reading.unit, labels: latest.definition(metric)?.valueLabels))
+                    Text(reading.formattedValue(in: displayUnits, labels: latest.definition(metric)?.valueLabels))
                         .font(.system(.title, design: .rounded, weight: .bold)).monospacedDigit().foregroundStyle(.primary)
                     Text("\(SignalFormat.source(reading.source)) · \(reading.quality.capitalized)")
                         .font(.caption).foregroundStyle(.secondary)
@@ -124,7 +125,7 @@ private struct SignalCard: View {
             if !summaries.isEmpty {
                 VStack(alignment: .leading, spacing: 6) {
                     ForEach(summaries) { reading in
-                        Text("\(SignalFormat.statistic(reading.statistic)): \(SignalFormat.value(reading.latest.value, unit: reading.unit, labels: latest.definition(metric)?.valueLabels))")
+                        Text("\(SignalFormat.statistic(reading.statistic)): \(reading.formattedValue(in: displayUnits, labels: latest.definition(metric)?.valueLabels))")
                             .font(.subheadline.weight(.semibold))
                     }
                     Text("Historical periods; tap for times and sources").font(.caption).foregroundStyle(.secondary)
@@ -142,6 +143,7 @@ private struct SignalCard: View {
 
 struct SignalHistoryView: View {
     @EnvironmentObject private var store: GarageStore
+    @AppStorage(DisplayUnits.preferenceKey) private var displayUnits: DisplayUnits = .metric
     let vehicleID: String
     let metric: String
     let latest: LatestSignals
@@ -172,7 +174,7 @@ struct SignalHistoryView: View {
             VStack(alignment: .leading, spacing: 20) {
                 if let reading = latest.readings(metric).first(where: { statistic == "trend" ? SignalHistory.trendStatistics.contains($0.statistic) : $0.statistic == statistic }) {
                     VStack(alignment: .leading, spacing: 5) {
-                        Text(SignalFormat.value(reading.latest.value, unit: reading.unit, labels: latest.definition(metric)?.valueLabels))
+                        Text(reading.formattedValue(in: displayUnits, labels: latest.definition(metric)?.valueLabels))
                             .font(.system(size: 38, weight: .bold, design: .rounded)).monospacedDigit()
                         Text("Last reported · \(reading.latest.calendarDate ?? reading.latest.timeLabel)")
                             .font(.subheadline).foregroundStyle(.secondary)
@@ -194,7 +196,7 @@ struct SignalHistoryView: View {
                     Button("Retry history") { Task { await load() } }.disabled(loading)
                 }
                 if loading { ProgressView("Loading history…").frame(maxWidth: .infinity) }
-                if let history, !history.displayedSeries(statistic).allSatisfy({ $0.points.isEmpty }) {
+                if let history = history?.displayed(in: displayUnits), !history.displayedSeries(statistic).allSatisfy({ $0.points.isEmpty }) {
                     let data = SignalChartData(history: history, statistic: statistic, valueLabels: latest.definition(metric)?.valueLabels)
                     SignalSeriesChart(data: data, unit: history.displayedUnit(statistic))
                     DisclosureGroup("About these readings") {
@@ -229,9 +231,9 @@ struct SignalHistoryView: View {
                 }
                 VStack(alignment: .leading, spacing: 12) {
                     Label("What this measures", systemImage: "info.circle").font(.headline).foregroundStyle(PitStyle.amber)
-                    Text(latest.definition(metric)?.description ?? "\(latest.label(metric)) is reported by your vehicle or its connected service. Values are shown in \(latest.definition(metric)?.unit ?? "the reported unit").")
+                    Text(displayUnits.explanation(latest.definition(metric)?.description ?? "\(latest.label(metric)) is reported by your vehicle or its connected service. Values are shown in \(displayUnits.unit(latest.definition(metric)?.unit ?? "the reported unit")).", unit: latest.definition(metric)?.unit ?? ""))
                     Text("How to read it").font(.subheadline.weight(.semibold))
-                    Text(latest.definition(metric)?.interpretation ?? "Compare readings from the same source and under similar conditions. A trend alone does not diagnose a fault; missing or stale readings do not mean zero.")
+                    Text(displayUnits.explanation(latest.definition(metric)?.interpretation ?? "Compare readings from the same source and under similar conditions. A trend alone does not diagnose a fault; missing or stale readings do not mean zero.", unit: latest.definition(metric)?.unit ?? ""))
                 }.font(.subheadline).fixedSize(horizontal: false, vertical: true)
                     .padding(18).frame(maxWidth: .infinity, alignment: .leading)
                     .background(PitStyle.panel, in: RoundedRectangle(cornerRadius: 18))
@@ -455,6 +457,7 @@ private struct SignalBucketDetails: View {
 }
 
 private struct SignalContextsView: View {
+    @AppStorage(DisplayUnits.preferenceKey) private var displayUnits: DisplayUnits = .metric
     let contexts: [SourcedSignalContext]
     var body: some View {
         DisclosureGroup("Collection details and diagnostics") {
@@ -480,14 +483,14 @@ private struct SignalContextsView: View {
                             Text("Recording segment · \(segment.state.capitalized)").font(.subheadline.weight(.semibold))
                             Text(SignalFormat.interval(segment.startedAt, segment.endedAt)).font(.caption)
                             Text("\(segment.samples) samples · \(segment.runningSeconds.formatted()) s running · \(segment.idleSeconds.formatted()) s idle").font(.caption)
-                            if let distance = segment.distanceKm { Text("Estimated distance \(SignalFormat.value(distance, unit: "km"))").font(.caption) }
-                            if let speed = segment.topSpeedKph { Text("Top speed \(SignalFormat.value(speed, unit: "km/h"))").font(.caption) }
+                            if let distance = segment.distanceKm { Text("Estimated distance \(displayUnits.formatted(distance, unit: "km"))").font(.caption) }
+                            if let speed = segment.topSpeedKph { Text("Top speed \(displayUnits.formatted(speed, unit: "km/h"))").font(.caption) }
                             Text("Speed coverage \(segment.speedCoverageSeconds.formatted()) s").font(.caption)
                         }
                         if let location = item.context.location {
                             Text("Reported location · \(location.type)").font(.subheadline.weight(.semibold))
                             Text("\(location.latitude.formatted(.number.precision(.fractionLength(5)))), \(location.longitude.formatted(.number.precision(.fractionLength(5))))").textSelection(.enabled)
-                            if let accuracy = location.accuracyMeters { Text("Reported accuracy \(accuracy.formatted()) m").font(.caption) }
+                            if let accuracy = location.accuracyMeters { Text("Reported accuracy \(displayUnits.formatted(accuracy, unit: "m"))").font(.caption) }
                         }
                         if item.context.kind == "snapshot" { Text("Calendar-day snapshot; no exact observation time supplied.").font(.caption) }
                     }.accessibilityElement(children: .combine)
