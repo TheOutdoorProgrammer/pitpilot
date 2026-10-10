@@ -61,13 +61,13 @@ Each integration is checked at most once per hour by default, including reconnec
 
 The status includes the next scheduled check even when reconnect is recommended. A successful check timestamp is recorded only when usable, timestamped vehicle data is received; an HTTP 200 containing only failed signals does not count. Smartcar's own vehicle refresh cadence is independent of PitPilot's schedule. Repeated cached readings keep their original OEM measurement time.
 
-REST polling retrieves available current state. It cannot reconstruct every route or a history of changes between polls. Parked locations do not describe a driven route. This deployment does not need a public webhook endpoint. Webhooks can be added later with signature verification, durable event deduplication, and reconciliation for missed deliveries; they are not silently implied by periodic sync.
+REST polling retrieves available current state. It cannot reconstruct every route or a history of changes between polls. Parked locations do not describe a driven route. Optional signed webhooks deliver available updates directly, with hourly polling retained for recovery.
 
 Operational traces and logs contain route templates, fixed state/error categories, counts, and timings. They exclude vehicle values, coordinates, VINs, provider identities, authorization URLs, tokens, callback parameters, and provider error bodies. The existing authenticated vehicle metrics endpoint remains private and opt-in.
 
 ## HTTP interface
 
-All routes require the household API token. POST requests require JSON. Neither Connect callbacks nor provider identities grant access to PitPilot by themselves.
+The household routes below require the API token. POST requests require JSON. Neither Connect callbacks nor provider identities grant access to PitPilot by themselves. The separate webhook route uses provider signature authentication.
 
 | Method and path | Behavior |
 | --- | --- |
@@ -84,3 +84,26 @@ All routes require the household API token. POST requests require JSON. Neither 
 The session response includes `sessionId`, `state`, `expiresAt`, and `candidates`; a new consent session also returns `authorizationUrl` and `callbackScheme`. Candidate objects contain `candidateId`, `make`, `model`, and `year`. Smartcar's callback uses snake case (`user_id`, `vehicle_id`, `external_id`), while the completion JSON uses camel case. Reject duplicate callback keys before submitting them.
 
 A validated callback declining consent consumes the session and returns HTTP 200 with `state: "cancelled"` and an empty candidate list. Other provider callback failures return a fixed safe error without exposing the provider's message. Neither case changes an existing binding.
+
+## Webhook delivery
+
+Enable Smartcar's V4 webhook payloads with these additional server settings:
+
+| Variable | Value |
+| --- | --- |
+| `PITPILOT_SMARTCAR_MANAGEMENT_TOKEN_FILE` | Mounted file containing the Application Management Token |
+| `PITPILOT_SMARTCAR_WEBHOOK_ID` | UUID of the webhook created in the Smartcar dashboard |
+
+Both settings are required together. With neither configured the receiver returns 503 and polling continues. The Application Management Token is separate from the OAuth client secret and must stay in server-side secret storage. Do not send it to the iOS app or put it in a callback URL.
+
+Create a webhook in the [Smartcar dashboard](https://dashboard.smartcar.com/integrations), using the supported signals listed above and `POST /api/v1/integrations/smartcar/webhook` on a public HTTPS hostname. Expose only that exact path and method, leaving the household API private. Keep automatic subscription off until verification succeeds. Save the webhook UUID and management token, configure the server, then use Smartcar's Verify action. Subscribe the already-connected vehicle after verification. Current V3 subscription management uses `POST https://management.api.smartcar.com/v3/subscriptions` with `data.attributes.webhookId`, `userId`, and `vehicleId`; creating an integration does not itself establish successful vehicle delivery.
+
+The unsigned `VERIFY` challenge returns its HMAC-SHA256 using the management token. Challenges are restricted to bounded token characters to prevent the challenge route from signing arbitrary JSON events. Vehicle events require a constant-time check of `SC-Signature` against the unchanged raw body, a matching webhook UUID and mode, and both provider user and vehicle matching the encrypted local binding. Bodies are capped at 1 MiB and reject duplicate JSON keys. Unbound vehicles are acknowledged without ingestion.
+
+`VEHICLE_STATE` reuses the existing signal adapter, preserving OEM timestamps, units, provenance, deduplication and independent last-known locations. Schema 9 stores a hashed event receipt in the same transaction as readings and status. Delivery retries may change their delivery metadata but cannot change an event's contents. Database failures return 503 without acknowledging the event. A concurrent polling job cannot erase a newer webhook observation. Older measurements can fill history while the newest valid position remains on the map.
+
+`VEHICLE_ERROR` records delivery metadata and the count of active errors. Error and resolution events have no trustworthy error-onset timestamp and never create readings, mark a successful sync, erase good data, or force another consent cycle. Polling confirms account recovery. Status exposes `lastWebhookAt`, `lastWebhookEventType`, and `webhookErrors`; these describe the last stored delivery, not live tracking or proof of fresh OEM data. Configuration exposes `webhooksConfigured`.
+
+Take a consistent database backup before upgrading to schema 9. An older binary refuses schema 9; stop the server and restore the verified backup for rollback, together with the existing encryption key. Ordinary JSON exports omit private integration bindings and webhook receipts. Retain the management token securely for webhook verification after restoring.
+
+Provider contracts: [payload verification](https://smartcar.com/docs/integrations/webhooks/payload-verification), [callback verification](https://smartcar.com/docs/integrations/webhooks/callback-verification), [vehicle state](https://smartcar.com/docs/api-reference/webhooks/events/vehicle-state), [vehicle errors](https://smartcar.com/docs/api-reference/webhooks/events/vehicle-error). See [ADR 11](../adr/0011-receive-signed-smartcar-webhooks-alongside-bounded-polling.md) for the delivery and recovery trade-offs.

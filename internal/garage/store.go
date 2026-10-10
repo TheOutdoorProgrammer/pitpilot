@@ -48,7 +48,7 @@ func Open(filename string) (*Store, error) {
 		db.Close()
 		return nil, err
 	}
-	if version > 8 {
+	if version > 9 {
 		db.Close()
 		return nil, errors.New("database schema is newer than this server")
 	}
@@ -113,6 +113,10 @@ func Open(filename string) (*Store, error) {
 		return nil, err
 	}
 	if err = initializeLegacySignalPolicies(db); err != nil {
+		db.Close()
+		return nil, err
+	}
+	if err = initializeSmartcarWebhooks(db); err != nil {
 		db.Close()
 		return nil, err
 	}

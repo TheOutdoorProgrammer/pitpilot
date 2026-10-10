@@ -280,7 +280,7 @@ func TestDiscardLegacySignalsBackupReopenPreservesPolicy(t *testing.T) {
 	}
 	defer restored.Close()
 	var version int
-	if err = restored.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != 8 {
+	if err = restored.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != 9 {
 		t.Fatal("schema downgrade on reopen", version, err)
 	}
 	if !reflect.DeepEqual(before, receiverExport(t, restored)) {

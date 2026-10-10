@@ -71,6 +71,7 @@ func NewWithOptions(store *garage.Store, token string, logger *slog.Logger, opti
 	s.registerSignals(register)
 	s.registerDevices(mux, register)
 	s.registerSmartcar(register)
+	mux.HandleFunc("POST /api/v1/integrations/smartcar/webhook", s.smartcarWebhook)
 	s.registerPhotos(mux, register)
 	if options.MetricsToken != "" {
 		if len(options.MetricsToken) < 32 || options.MetricsToken == token || strings.ContainsAny(options.MetricsToken, " \t\r\n\x00") {

@@ -42,6 +42,9 @@ type SmartcarStatus struct {
 	SupportedMetrics       []string   `json:"supportedMetrics"`
 	UnavailableSignals     int        `json:"unavailableSignals"`
 	UnsupportedSignals     int        `json:"unsupportedSignals"`
+	LastWebhookAt          *time.Time `json:"lastWebhookAt,omitempty"`
+	LastWebhookEventType   string     `json:"lastWebhookEventType,omitempty"`
+	WebhookErrors          int        `json:"webhookErrors"`
 }
 
 type SmartcarConnection struct {
@@ -173,6 +176,11 @@ func (s *Store) BindSmartcar(ctx context.Context, session SmartcarSession, expec
 		return ErrSmartcarConflict
 	}
 	if previous.ID != "" {
+		// Reauthorization replaces the connection generation; old receipts must
+		// not prevent its ID changing or authenticate deliveries for the new binding.
+		if _, err = tx.ExecContext(ctx, `DELETE FROM smartcar_webhook_receipts WHERE connection_id=?`, previous.ID); err != nil {
+			return err
+		}
 		v.Status.LastAttemptAt = previous.Status.LastAttemptAt
 		v.RetryAt = previous.RetryAt
 		if previous.NextAttemptAt.After(v.NextAttemptAt) {
@@ -271,16 +279,30 @@ func (s *Store) FinishSmartcar(ctx context.Context, v SmartcarConnection, batch 
 		return
 	}
 	defer tx.Rollback()
-	var token string
-	if err = tx.QueryRowContext(ctx, `SELECT lease_token FROM smartcar_connections WHERE id=? AND vehicle_id=?`, v.ID, v.VehicleID).Scan(&token); err != nil {
+	current, err := scanSmartcar(tx.QueryRowContext(ctx, `SELECT `+smartcarColumns+` FROM smartcar_connections WHERE id=? AND vehicle_id=?`, v.ID, v.VehicleID))
+	if err != nil {
 		return
 	}
-	if token == "" || token != v.LeaseToken {
+	if current.LeaseToken == "" || current.LeaseToken != v.LeaseToken {
 		return ErrSmartcarConflict
 	}
 	if batch != nil && (len(batch.Observations) > 0 || len(batch.Contexts) > 0) {
 		if _, err = ingestSignalsTx(ctx, tx, v.VehicleID, *batch); err != nil {
 			return
+		}
+	}
+	// A webhook can commit while this worker is waiting for the provider.
+	v.Status.LastWebhookAt = current.Status.LastWebhookAt
+	v.Status.LastWebhookEventType = current.Status.LastWebhookEventType
+	v.Status.WebhookErrors = current.Status.WebhookErrors
+	v.Status.SupportedMetrics = mergeSmartcarMetrics(v.Status.SupportedMetrics, current.Status.SupportedMetrics)
+	if current.Status.LastSuccessAt != nil && (v.Status.LastSuccessAt == nil || current.Status.LastSuccessAt.After(*v.Status.LastSuccessAt)) {
+		v.Status.LastSuccessAt = current.Status.LastSuccessAt
+	}
+	if current.Status.LatestObservedAt != nil && (v.Status.LatestObservedAt == nil || current.Status.LatestObservedAt.After(*v.Status.LatestObservedAt)) {
+		v.Status.LatestObservedAt = current.Status.LatestObservedAt
+		if v.Status.ErrorCode == "no_timestamped_signals" {
+			v.Status.State, v.Status.ErrorCode = current.Status.State, current.Status.ErrorCode
 		}
 	}
 	raw, err := json.Marshal(v.Status)

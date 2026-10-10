@@ -33,6 +33,7 @@ type Config struct {
 	ApplicationID, ClientID, ClientSecret, Mode, RedirectURI string
 	EncryptionKey                                            []byte
 	PollInterval                                             time.Duration
+	ManagementToken, WebhookID                               string
 }
 type Service struct {
 	store                            *garage.Store
@@ -43,17 +44,24 @@ type Service struct {
 	applicationID, mode, redirectURI string
 	interval                         time.Duration
 	wake                             chan struct{}
+	managementToken, webhookID       string
 }
 type Configuration struct {
 	Configured          bool   `json:"configured"`
 	Mode                string `json:"mode,omitempty"`
 	ConnectAvailable    bool   `json:"connectAvailable"`
 	PollIntervalSeconds int    `json:"pollIntervalSeconds"`
+	WebhooksConfigured  bool   `json:"webhooksConfigured"`
 }
 
 func New(store *garage.Store, cfg Config, logger *slog.Logger) (*Service, error) {
 	if store == nil || logger == nil || len(cfg.EncryptionKey) != 32 || !validApplicationID(cfg.ApplicationID) || !validProviderID(cfg.ClientID) || len(cfg.ClientSecret) < 16 || strings.ContainsAny(cfg.ClientSecret, "\r\n\x00") {
 		return nil, errors.New("invalid smartcar configuration")
+	}
+	if cfg.ManagementToken != "" || cfg.WebhookID != "" {
+		if len(cfg.ManagementToken) < 16 || len(cfg.ManagementToken) > 16384 || strings.ContainsAny(cfg.ManagementToken, " \t\r\n\x00") || !validApplicationID(cfg.WebhookID) {
+			return nil, errors.New("Smartcar webhook requires a management token and webhook UUID")
+		}
 	}
 	if cfg.Mode == "" {
 		cfg.Mode = "live"
@@ -83,6 +91,7 @@ func New(store *garage.Store, cfg Config, logger *slog.Logger) (*Service, error)
 		return nil, err
 	}
 	s := &Service{store: store, client: newClient(cfg.ClientID, cfg.ClientSecret), logger: logger, aead: aead, key: append([]byte(nil), cfg.EncryptionKey...), applicationID: cfg.ApplicationID, mode: cfg.Mode, redirectURI: cfg.RedirectURI, interval: cfg.PollInterval, wake: make(chan struct{}, 1)}
+	s.managementToken, s.webhookID = cfg.ManagementToken, cfg.WebhookID
 	connections, err := store.SmartcarConnections(context.Background())
 	if err != nil {
 		return nil, err
@@ -104,7 +113,7 @@ func validApplicationID(id string) bool {
 }
 
 func (s *Service) Configuration() Configuration {
-	return Configuration{true, s.mode, true, int(s.interval.Seconds())}
+	return Configuration{Configured: true, Mode: s.mode, ConnectAvailable: true, PollIntervalSeconds: int(s.interval.Seconds()), WebhooksConfigured: s.WebhooksConfigured()}
 }
 func (s *Service) Status(ctx context.Context, vehicleID string) (garage.SmartcarStatus, error) {
 	if _, err := s.store.Vehicle(ctx, vehicleID); err != nil {

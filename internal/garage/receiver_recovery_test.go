@@ -271,7 +271,7 @@ func TestReceiverRecoverySchemaReopenRetainsArchive(t *testing.T) {
 	}
 	defer s.Close()
 	var version int
-	if err = s.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != 8 {
+	if err = s.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != 9 {
 		t.Fatalf("schema: %d %v", version, err)
 	}
 	if !reflect.DeepEqual(before, receiverExport(t, s)) {

@@ -54,5 +54,17 @@ func configuredSmartcar(store *garage.Store, logger *slog.Logger) (*smartcar.Ser
 			return nil, errors.New("invalid Smartcar poll interval")
 		}
 	}
-	return smartcar.New(store, smartcar.Config{ApplicationID: application, ClientID: values[0], ClientSecret: values[1], EncryptionKey: key, Mode: env("PITPILOT_SMARTCAR_MODE", "live"), PollInterval: interval}, logger)
+	managementToken := ""
+	webhookID := os.Getenv("PITPILOT_SMARTCAR_WEBHOOK_ID")
+	if path := os.Getenv("PITPILOT_SMARTCAR_MANAGEMENT_TOKEN_FILE"); path != "" {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			return nil, errors.New("cannot read Smartcar management token file")
+		}
+		managementToken = strings.TrimSpace(string(raw))
+		if managementToken == "" {
+			return nil, errors.New("Smartcar management token file is empty")
+		}
+	}
+	return smartcar.New(store, smartcar.Config{ApplicationID: application, ClientID: values[0], ClientSecret: values[1], EncryptionKey: key, Mode: env("PITPILOT_SMARTCAR_MODE", "live"), PollInterval: interval, ManagementToken: managementToken, WebhookID: webhookID}, logger)
 }
