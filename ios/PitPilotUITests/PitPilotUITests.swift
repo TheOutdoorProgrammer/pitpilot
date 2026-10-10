@@ -171,7 +171,7 @@ final class PitPilotUITests: XCTestCase {
         miles.typeText("125100")
         app.buttons["Complete"].tap()
         XCTAssertTrue(miles.waitForNonExistence(timeout: 5))
-        XCTAssertTrue(app.staticTexts["At 130,100 mi"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["At 209,375.65 km"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["Complete Synthetic recurring oil"].exists)
         capture("Recurring reminder advanced once", app)
     }
@@ -226,6 +226,107 @@ final class PitPilotUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Saved history on this phone"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.descendants(matching: .any)["signalHistoryChart"].exists)
         capture("Offline saved fuel history", app)
+    }
+
+    func testImperialDisplayUnitsPersistAndConvertCachedHistoryOffline() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-testing", "--ui-testing-signals"]
+        app.launch()
+        connect(app)
+        openDisplayUnits(app)
+        assertDisplayUnits("Metric", app)
+        app.buttons["displayUnits"].tap()
+        app.buttons["Imperial (US)"].tap()
+        assertDisplayUnits("Imperial (US)", app)
+        capture("Imperial display preference in Settings", app)
+        closeDisplayUnits(app)
+
+        app.staticTexts["Synthetic route truck"].tap()
+        let pressure = app.buttons["signal-manifold_kpa"]
+        reveal(pressure, app)
+        XCTAssertTrue(pressure.label.contains("5.66 psi"))
+        capture("Imperial dashboard pressure", app)
+        pressure.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["signalHistoryChart"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["psi"].exists)
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "5.66 psi")).firstMatch.exists)
+        capture("Imperial pressure history portrait", app)
+
+        XCUIDevice.shared.orientation = .landscapeLeft
+        defer { XCUIDevice.shared.orientation = .portrait }
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in app.frame.width > app.frame.height }, object: nil)], timeout: 5), .completed)
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.8)).press(forDuration: 0.1,
+            thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4)))
+        capture("Imperial pressure history landscape", app)
+        XCUIDevice.shared.orientation = .portrait
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in app.frame.width < app.frame.height }, object: nil)], timeout: 5), .completed)
+        assertPressureChartValues(minimum: "4.5 psi", maximum: "6.09 psi", average: "5.29 psi", app)
+        capture("Imperial chart values preserve converted extrema and average", app)
+
+        app.terminate()
+        app.launchArguments = ["--ui-testing", "--ui-testing-signals", "--ui-testing-preserve-cache", "--ui-testing-offline"]
+        app.launch()
+        XCTAssertTrue(app.staticTexts["Saved on this phone"].waitForExistence(timeout: 5))
+        openDisplayUnits(app)
+        assertDisplayUnits("Imperial (US)", app)
+        closeDisplayUnits(app)
+        app.staticTexts["Synthetic route truck"].tap()
+        reveal(pressure, app)
+        XCTAssertTrue(pressure.label.contains("5.66 psi"))
+        pressure.tap()
+        XCTAssertTrue(app.staticTexts["Saved history on this phone"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["psi"].exists)
+        assertPressureChartValues(minimum: "4.5 psi", maximum: "6.09 psi", average: "5.29 psi", app)
+        capture("Imperial saved history while offline", app)
+
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        openDisplayUnits(app)
+        app.buttons["displayUnits"].tap()
+        app.buttons["Metric"].tap()
+        assertDisplayUnits("Metric", app)
+        closeDisplayUnits(app)
+        reveal(pressure, app)
+        XCTAssertTrue(pressure.label.contains("39 kPa"))
+        XCTAssertFalse(pressure.label.contains("psi"))
+        pressure.tap()
+        XCTAssertTrue(app.staticTexts["Saved history on this phone"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["kPa"].exists)
+        assertPressureChartValues(minimum: "31 kPa", maximum: "42 kPa", average: "36.5 kPa", app)
+        capture("Metric history restored offline without changing source readings", app)
+
+        app.terminate()
+        app.launch()
+        XCTAssertTrue(app.staticTexts["Saved on this phone"].waitForExistence(timeout: 5))
+        openDisplayUnits(app)
+        assertDisplayUnits("Metric", app)
+        closeDisplayUnits(app)
+    }
+
+    private func openDisplayUnits(_ app: XCUIApplication) {
+        app.buttons["garageMenu"].tap()
+        app.buttons["menuSettings"].tap()
+        XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 5))
+        reveal(app.buttons["displayUnits"], app)
+    }
+
+    private func assertDisplayUnits(_ value: String, _ app: XCUIApplication) {
+        let picker = app.buttons["displayUnits"]
+        let selected = NSPredicate(format: "value CONTAINS %@ OR label CONTAINS %@", value, value)
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: selected, object: picker)], timeout: 5), .completed)
+    }
+
+    private func closeDisplayUnits(_ app: XCUIApplication) {
+        app.navigationBars["Settings"].buttons["Done"].tap()
+        app.navigationBars["Garage menu"].buttons["Done"].tap()
+    }
+
+    private func assertPressureChartValues(minimum: String, maximum: String, average: String, _ app: XCUIApplication) {
+        let values = app.buttons["signalValues"]
+        reveal(values, app)
+        values.tap()
+        let bucket = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@ AND label CONTAINS %@ AND label CONTAINS %@",
+            "Min \(minimum)", "Max \(maximum)", "Bucket average \(average)")).firstMatch
+        reveal(bucket, app)
     }
 
     func testDashboardMetricVisibilityPersistsAndCanBeRestoredOffline() {
