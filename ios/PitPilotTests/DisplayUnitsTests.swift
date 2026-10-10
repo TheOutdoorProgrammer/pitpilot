@@ -2,6 +2,25 @@ import XCTest
 @testable import PitPilot
 
 final class DisplayUnitsTests: XCTestCase {
+    func testSmallSignedPressureReadingsDoNotRoundToZero() {
+        for pascals in [-1.0, 1.0] {
+            let expected = (pascals * 0.000145).formatted(.number.precision(.fractionLength(0...6))) + " psi"
+            let display = DisplayUnits.imperial.formatted(pascals, unit: "Pa")
+            XCTAssertEqual(display, expected)
+            XCTAssertNotEqual(display, DisplayUnits.imperial.formatted(0, unit: "Pa"))
+            let projected = SignalHistoryPoint(minimum: pascals, maximum: pascals, mean: pascals,
+                first: pascals, last: pascals, count: 1).displayed(in: .imperial, unit: "Pa")
+            XCTAssertEqual(SignalFormat.value(projected.mean, unit: "psi"), expected)
+            XCTAssertEqual(projected.count, 1)
+        }
+        XCTAssertEqual(DisplayUnits.imperial.formatted(39, unit: "kPa"),
+                       5.66.formatted(.number.precision(.fractionLength(0...2))) + " psi")
+        XCTAssertEqual(SignalFormat.value(0, unit: "psi"), "0 psi")
+        XCTAssertEqual(SignalFormat.value(1, unit: "count"), "1")
+        XCTAssertEqual(SignalFormat.value(0.001, unit: "boolean"), "Unknown")
+        XCTAssertEqual(SignalFormat.value(0.001, unit: "code"), "Unknown code")
+    }
+
     func testImperialConversionsUseUSVolumeAndPreserveTemperatureOffsets() {
         let cases: [(Double, String, Double, String)] = [
             (0, "°C", 32, "°F"), (100, "°C", 212, "°F"), (-40, "celsius", -40, "°F"),

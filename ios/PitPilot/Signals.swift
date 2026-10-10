@@ -502,7 +502,14 @@ enum SignalFormat {
         case "count": label = ""
         default: label = unit
         }
-        return number.formatted(.number.precision(.fractionLength(0...2))) + (label.isEmpty ? "" : " \(label)")
+        let formatted: String
+        // Converted low-pressure readings must not disappear into a rounded zero.
+        if number != 0, abs(number) < 0.01, unit != "count" {
+            formatted = number.formatted(.number.precision(.significantDigits(1...3)))
+        } else {
+            formatted = number.formatted(.number.precision(.fractionLength(0...2)))
+        }
+        return formatted + (label.isEmpty ? "" : " \(label)")
     }
     static func source(_ source: String) -> String {
         switch source { case "pi": return "Raspberry Pi"; case "smartcar": return "Smartcar"; case "lubelogger": return "LubeLogger"; default: return source.capitalized }
