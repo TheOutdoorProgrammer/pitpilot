@@ -375,8 +375,9 @@ func (u *Updater) fetch(ctx context.Context, url string, limit int64) ([]byte, e
 	return raw, nil
 }
 func (u *Updater) download(ctx context.Context, m Manifest) (string, error) {
-	dir := filepath.Join(u.InstallDir, "releases", m.Version+"-"+m.SHA256[:16])
-	if e := os.MkdirAll(dir, 0755); e != nil {
+	release := m.Version + "-" + m.SHA256[:16]
+	dir := filepath.Join(u.InstallDir, "releases", release)
+	if e := u.prepareReleaseDirectory(release); e != nil {
 		return "", e
 	}
 	target := filepath.Join(dir, "picollector")
@@ -419,6 +420,63 @@ func (u *Updater) download(ctx context.Context, m Manifest) (string, error) {
 		return "", e
 	}
 	return target, nil
+}
+
+func (u *Updater) prepareReleaseDirectory(release string) error {
+	install, err := os.OpenFile(u.InstallDir, os.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
+	if err != nil {
+		return err
+	}
+	defer install.Close()
+	if err := trustedUpdateDirectory(install); err != nil {
+		return err
+	}
+	releases, err := readableUpdateDirectory(install, "releases")
+	if err != nil {
+		return err
+	}
+	defer releases.Close()
+	dir, err := readableUpdateDirectory(releases, release)
+	if err != nil {
+		return err
+	}
+	return dir.Close()
+}
+
+func trustedUpdateDirectory(dir *os.File) error {
+	var info unix.Stat_t
+	if err := unix.Fstat(int(dir.Fd()), &info); err != nil {
+		return err
+	}
+	if info.Uid != uint32(os.Geteuid()) || info.Mode&0022 != 0 {
+		return errors.New("update directory must be owned by the updater and not writable by others")
+	}
+	return nil
+}
+
+func readableUpdateDirectory(parent *os.File, name string) (*os.File, error) {
+	if err := unix.Mkdirat(int(parent.Fd()), name, 0755); err != nil && !errors.Is(err, unix.EEXIST) {
+		return nil, err
+	}
+	fd, err := unix.Openat(int(parent.Fd()), name, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
+	if err != nil {
+		return nil, err
+	}
+	dir := os.NewFile(uintptr(fd), name)
+	if err = trustedUpdateDirectory(dir); err == nil {
+		// systemd's private umask must protect the journal, but readers need to
+		// traverse public binary directories. Chmod the opened directory itself
+		// so an existing restrictive mode is repaired without following symlinks.
+		err = dir.Chmod(0755)
+	}
+	if err == nil {
+		err = dir.Sync()
+	}
+	if err != nil {
+		dir.Close()
+		return nil, err
+	}
+	return dir, nil
 }
 
 func (m Manifest) String() string { return fmt.Sprintf("collector %s (%s)", m.Version, m.Platform) }
