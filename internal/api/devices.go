@@ -1,6 +1,8 @@
 package api
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
@@ -15,6 +17,7 @@ func (s *Server) registerDevices(mux *http.ServeMux, register func(string, http.
 	register("DELETE /api/v1/devices/{id}", s.revokeDevice)
 	mux.HandleFunc("POST /api/v1/device/enroll", s.enrollDevice)
 	mux.HandleFunc("GET /api/v1/device/config", s.deviceConfig)
+	mux.HandleFunc("GET /api/v1/device/power-policy", s.devicePowerPolicy)
 	mux.HandleFunc("POST /api/v1/device/heartbeat", s.deviceHeartbeat)
 	mux.HandleFunc("POST /api/v1/device/signals", s.deviceSignals)
 }
@@ -85,17 +88,44 @@ func (s *Server) createDevice(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) updateDevice(w http.ResponseWriter, r *http.Request) {
 	var input struct {
-		AutoUpdate   *bool `json:"autoUpdate"`
-		GPSRecording *bool `json:"gpsRecording"`
+		AutoUpdate    *bool           `json:"autoUpdate"`
+		GPSRecording  *bool           `json:"gpsRecording"`
+		PowerSafeZone json.RawMessage `json:"powerSafeZone"`
 	}
 	if !decode(w, r, &input) {
 		return
 	}
-	if input.AutoUpdate == nil && input.GPSRecording == nil {
-		fail(w, 422, "autoUpdate or gpsRecording is required")
+	if input.AutoUpdate == nil && input.GPSRecording == nil && input.PowerSafeZone == nil {
+		fail(w, 422, "autoUpdate, gpsRecording or powerSafeZone is required")
 		return
 	}
-	out, err := s.store.SetDevicePolicy(r.Context(), r.PathValue("id"), input.AutoUpdate, input.GPSRecording)
+	var zone *garage.PowerSafeZone
+	var patch **garage.PowerSafeZone
+	if input.PowerSafeZone != nil {
+		patch = &zone
+		if !bytes.Equal(bytes.TrimSpace(input.PowerSafeZone), []byte("null")) {
+			var fields struct {
+				Latitude     *float64 `json:"latitude"`
+				Longitude    *float64 `json:"longitude"`
+				RadiusMeters *float64 `json:"radiusMeters"`
+			}
+			decoder := json.NewDecoder(bytes.NewReader(input.PowerSafeZone))
+			decoder.DisallowUnknownFields()
+			if err := decoder.Decode(&fields); err != nil {
+				fail(w, 400, "invalid power-safe zone")
+				return
+			}
+			if fields.Latitude == nil || fields.Longitude == nil || fields.RadiusMeters == nil {
+				fail(w, 422, "power-safe zone requires latitude, longitude and radiusMeters")
+				return
+			}
+			zone = &garage.PowerSafeZone{Latitude: *fields.Latitude, Longitude: *fields.Longitude, RadiusMeters: *fields.RadiusMeters}
+			if !validate(w, zone.Validate()) {
+				return
+			}
+		}
+	}
+	out, err := s.store.SetDevicePolicy(r.Context(), r.PathValue("id"), input.AutoUpdate, input.GPSRecording, patch)
 	if err != nil {
 		s.failure(w, r, err)
 		return
@@ -147,6 +177,19 @@ func (s *Server) deviceConfig(w http.ResponseWriter, r *http.Request) {
 		garage.DeviceConfiguration
 		GPSRecording *bool `json:"gpsRecording,omitempty"`
 	}{out, gps})
+}
+
+func (s *Server) devicePowerPolicy(w http.ResponseWriter, r *http.Request) {
+	token, ok := deviceRequest(w, r, true)
+	if !ok {
+		return
+	}
+	out, err := s.store.DevicePowerPolicy(r.Context(), token)
+	if err != nil {
+		s.deviceFailure(w, r, err)
+		return
+	}
+	respond(w, 200, out)
 }
 
 func (s *Server) deviceHeartbeat(w http.ResponseWriter, r *http.Request) {

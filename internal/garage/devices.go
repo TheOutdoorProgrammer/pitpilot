@@ -18,15 +18,16 @@ var ErrDeviceUnauthorized = errors.New("device authorization expired or revoked"
 var ErrDeviceLimit = errors.New("vehicle has too many active devices")
 
 type Device struct {
-	ID           string     `json:"id"`
-	VehicleID    string     `json:"vehicleId"`
-	Name         string     `json:"name"`
-	CreatedAt    time.Time  `json:"createdAt"`
-	AutoUpdate   bool       `json:"autoUpdate"`
-	GPSRecording bool       `json:"gpsRecording"`
-	EnrolledAt   *time.Time `json:"enrolledAt,omitempty"`
-	RevokedAt    *time.Time `json:"revokedAt,omitempty"`
-	LastSeenAt   *time.Time `json:"lastSeenAt,omitempty"`
+	ID            string         `json:"id"`
+	VehicleID     string         `json:"vehicleId"`
+	Name          string         `json:"name"`
+	CreatedAt     time.Time      `json:"createdAt"`
+	AutoUpdate    bool           `json:"autoUpdate"`
+	GPSRecording  bool           `json:"gpsRecording"`
+	PowerSafeZone *PowerSafeZone `json:"powerSafeZone,omitempty"`
+	EnrolledAt    *time.Time     `json:"enrolledAt,omitempty"`
+	RevokedAt     *time.Time     `json:"revokedAt,omitempty"`
+	LastSeenAt    *time.Time     `json:"lastSeenAt,omitempty"`
 	*DeviceHeartbeat
 }
 
@@ -261,12 +262,18 @@ func saveDevice(ctx context.Context, tx *sql.Tx, d Device) error {
 }
 
 func (s *Store) SetDeviceAutoUpdate(ctx context.Context, id string, enabled bool) (out Device, err error) {
-	return s.SetDevicePolicy(ctx, id, &enabled, nil)
+	return s.SetDevicePolicy(ctx, id, &enabled, nil, nil)
 }
 
-func (s *Store) SetDevicePolicy(ctx context.Context, id string, autoUpdate, gpsRecording *bool) (out Device, err error) {
+// A nil powerSafeZone preserves the zone; a pointer to nil explicitly clears it.
+func (s *Store) SetDevicePolicy(ctx context.Context, id string, autoUpdate, gpsRecording *bool, powerSafeZone **PowerSafeZone) (out Device, err error) {
 	ctx, done := operation(ctx, "db.device.policy")
 	defer func() { done(err) }()
+	if powerSafeZone != nil && *powerSafeZone != nil {
+		if err = (*powerSafeZone).Validate(); err != nil {
+			return out, err
+		}
+	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return out, err
@@ -284,6 +291,9 @@ func (s *Store) SetDevicePolicy(ctx context.Context, id string, autoUpdate, gpsR
 	}
 	if gpsRecording != nil {
 		out.GPSRecording = *gpsRecording
+	}
+	if powerSafeZone != nil {
+		out.PowerSafeZone = *powerSafeZone
 	}
 	if err = saveDevice(ctx, tx, out); err != nil {
 		return out, err
