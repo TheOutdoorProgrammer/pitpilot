@@ -186,6 +186,7 @@ struct SignalHistoryView: View {
                     }.pickerStyle(.menu).accessibilityIdentifier("signalStatistic")
                 }
                 Picker("History range", selection: $days) {
+                    Text("24 hours").tag(1)
                     Text("7 days").tag(7)
                     Text("30 days").tag(30)
                     Text("1 year").tag(365)
@@ -195,21 +196,22 @@ struct SignalHistoryView: View {
                     Text(error).foregroundStyle(.orange).font(.callout)
                     Button("Retry history") { Task { await load() } }.disabled(loading)
                 }
-                if loading { ProgressView("Loading history…").frame(maxWidth: .infinity) }
+                if loading { ProgressView("Loading history…").frame(maxWidth: .infinity).accessibilityIdentifier("signalHistoryLoading") }
                 if let history = history?.displayed(in: displayUnits), !history.displayedSeries(statistic).allSatisfy({ $0.points.isEmpty }) {
                     let data = SignalChartData(history: history, statistic: statistic, valueLabels: latest.definition(metric)?.valueLabels)
                     SignalSeriesChart(data: data, unit: history.displayedUnit(statistic))
+                        .id("\(days)/\(statistic)/\(displayUnits.rawValue)")
                     DisclosureGroup("About these readings") {
                         VStack(alignment: .leading, spacing: 10) {
                             Text("Requested range: \(SignalFormat.interval(history.from, history.to))")
-                            Text("One timeline combines readings from all sources. Snapshot and period-average values remain summaries; they are not converted into live samples. Dotted lines connect sparse reports as a visual guide, not measurements in the gaps. Blank gaps are not zero.")
+                            Text("One timeline combines readings from all sources. Snapshot and period-average values remain summaries; they are not converted into live samples. Blank gaps are periods without recorded coverage, not zero readings.")
                             if history.series.contains(where: { $0.points.contains(where: { $0.calendarDate != nil }) }) {
                                 Text("Square points have day precision only; time and timezone are unknown. They are centered on their reported date for display. Timestamped readings retain their exact times, with UTC dates on the shared axis. Dotted lines guide the eye between sparse reported days, not measurements in the gaps.")
                             }
                             if history.unit == "boolean" || history.unit == "code" {
                                 Text("Lanes show observed states. Mixed means different states were recorded within a bucket; transition times and state durations are unavailable. Sample bands stop at 15 minutes; longer windows show recorded endpoints. No average is treated as a state.")
                             } else if statistic == "trend" {
-                                Text("Solid lines connect recorded endpoints up to 15 minutes apart, breaking at empty buckets. Unshaded dotted guides cross longer gaps. Shading preserves each bucket's minimum and maximum; gaps inside a reduced bucket may be unavailable.")
+                                Text("Lines follow recorded samples and preserved peaks at their actual times. Shading stays under those lines. Collection gaps longer than 15 minutes remain empty; reduced periods with unknown coverage are not connected. Minimum, maximum and average values remain available below. Choose 24 hours for recent detail.")
                             } else {
                                 Text("Each value describes its reporting period. When several summaries share a bucket, the chart shows their average and range, not a combined total or an exact measurement time.")
                             }
@@ -287,8 +289,8 @@ private struct SignalSeriesChart: View {
         if data.kind == .bars {
             return data.buckets.contains { $0.point.count > 1 } ? "Average per bucket · whiskers show range" : SignalFormat.statistic(data.statistic)
         }
-        if data.hasCalendarDays { return "One timeline · squares have day precision · dotted gaps" }
-        if data.statistic == "trend" { return "Recorded trend · shaded range · dotted gaps" }
+        if data.hasCalendarDays { return "Squares show daily summaries · gaps in samples stay empty" }
+        if data.statistic == "trend" { return "Recorded readings · gaps show missing coverage" }
         let statistic = SignalFormat.statistic(data.statistic)
         return data.buckets.contains { $0.point.count > 1 } ? "\(statistic) · bucket averages and range" : "\(statistic) · reported periods"
     }
@@ -305,7 +307,7 @@ private struct SignalSeriesChart: View {
             let sources = Array(Set(data.buckets.compactMap { $0.origin?.label })).sorted()
             Text(sources.joined(separator: " · ")).font(.caption).foregroundStyle(.secondary)
             if let first = data.buckets.first, let last = data.buckets.last {
-                Text("\(data.xLabel(first.start)) to \(data.xLabel(last.end))\(data.calendar ? " · Day precision" : "")")
+                Text("\(data.xLabel(first.start).replacingOccurrences(of: "\n", with: " ")) to \(data.xLabel(last.end).replacingOccurrences(of: "\n", with: " "))\(data.calendar ? " · Day precision" : "")")
                     .font(.caption).foregroundStyle(.secondary)
             }
             if let selection, let bucket = data.buckets.min(by: { abs($0.center - selection) < abs($1.center - selection) }) {
@@ -320,7 +322,8 @@ private struct SignalSeriesChart: View {
     }
 
     private var numericChart: some View {
-        Chart {
+        let isolated = data.isolatedVertexIDs
+        return Chart {
             if data.kind == .trend {
                 ForEach(data.sparseVertices) { vertex in
                     LineMark(x: .value("Position", vertex.x), y: .value("Value", vertex.value), series: .value("Segment", vertex.segment))
@@ -332,11 +335,14 @@ private struct SignalSeriesChart: View {
                         .interpolationMethod(.linear).accessibilityHidden(true)
                     LineMark(x: .value("Position", vertex.x), y: .value("Value", vertex.value), series: .value("Segment", vertex.segment))
                         .foregroundStyle(vertex.estimated ? .cyan : tint).lineStyle(StrokeStyle(lineWidth: 2.5, lineCap: .round, lineJoin: .round)).interpolationMethod(.linear)
-                        .accessibilityHidden(true)
-                    PointMark(x: .value("Position", vertex.x), y: .value("Value", vertex.value))
-                        .foregroundStyle(vertex.estimated ? .cyan : tint).symbolSize(data.vertices.count > 30 ? 9 : 30)
-                        .symbol(vertex.calendarDay ? BasicChartSymbolShape.square : BasicChartSymbolShape.circle)
+                        .accessibilityHidden(data.vertices.count <= 30 || vertex.calendarDay || isolated.contains(vertex.id))
                         .accessibilityLabel(data.xLabel(vertex.x)).accessibilityValue(SignalFormat.value(vertex.value, unit: unit))
+                    if data.vertices.count <= 30 || vertex.calendarDay || isolated.contains(vertex.id) {
+                        PointMark(x: .value("Position", vertex.x), y: .value("Value", vertex.value))
+                            .foregroundStyle(vertex.estimated ? .cyan : tint).symbolSize(data.vertices.count > 30 ? 9 : 30)
+                            .symbol(vertex.calendarDay ? BasicChartSymbolShape.square : BasicChartSymbolShape.circle)
+                            .accessibilityLabel(data.xLabel(vertex.x)).accessibilityValue(SignalFormat.value(vertex.value, unit: unit))
+                    }
                 }
             }
             ForEach(data.buckets) { bucket in
@@ -354,7 +360,7 @@ private struct SignalSeriesChart: View {
                             .accessibilityValue(SignalFormat.value(0, unit: unit))
                     }
                 }
-                if bucket.point.minimum != bucket.point.maximum {
+                if bucket.point.minimum != bucket.point.maximum, (bucket.origin?.statistic ?? data.statistic) != "sample" {
                     if !data.calendar, data.kind == .trend, bucket.start != bucket.end {
                         RectangleMark(xStart: .value("Period start", bucket.start), xEnd: .value("Period end", bucket.end), yStart: .value("Minimum", bucket.point.minimum), yEnd: .value("Maximum", bucket.point.maximum))
                             .foregroundStyle(tint.opacity(0.14)).accessibilityHidden(true)
@@ -378,6 +384,8 @@ private struct SignalSeriesChart: View {
         .chartXSelection(value: $selection)
         .chartPlotStyle { $0.clipped() }
         .frame(height: 260).accessibilityIdentifier(identifier)
+        .accessibilityLabel("Reading history")
+        .accessibilityHint("Open Read chart values below for exact readings and reporting periods.")
     }
 
     private var stateChart: some View {

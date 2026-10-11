@@ -248,9 +248,9 @@ final class PitPilotTests: XCTestCase {
         XCTAssertEqual(chart.vertices.count, 94)
         XCTAssertEqual(chart.buckets.filter { $0.calendar }.count, 89)
         XCTAssertTrue(chart.hasCalendarDays)
-        XCTAssertEqual(chart.sparseVertices.count, 10)
-        XCTAssertTrue(chart.sparseVertices.contains { $0.segment.hasPrefix("source-gap/pi/") })
-        XCTAssertTrue(chart.sparseVertices.contains { $0.segment.hasPrefix("gap/lubelogger/measured/sample/") })
+        XCTAssertEqual(chart.sparseVertices.count, 4)
+        XCTAssertFalse(chart.sparseVertices.contains { $0.segment.hasPrefix("source-gap/pi/") })
+        XCTAssertFalse(chart.sparseVertices.contains { $0.segment.hasPrefix("gap/lubelogger/measured/sample/") })
         XCTAssertFalse(chart.sparseVertices.contains { $0.segment.hasPrefix("gap/pi/") })
         XCTAssertEqual(Set(chart.vertices.filter { $0.id.hasPrefix("pi/") }.map(\.segment)).count, 1)
         XCTAssertEqual(Set(chart.buckets.map(\.id)).count, chart.buckets.count)
@@ -740,7 +740,7 @@ final class PitPilotTests: XCTestCase {
         XCTAssertEqual(summary.stateMarks[0].start, summary.stateMarks[0].end)
     }
 
-    func testTimestampTrendBreaksMissingBucketsAndLongUnknownGaps() throws {
+    func testTimestampTrendBreaksLongCollectionGapsAndUnknownInternalCoverage() throws {
         func point(_ start: String, _ end: String, _ first: String, _ last: String) -> SignalHistoryPoint {
             SignalHistoryPoint(bucketStart: start, bucketEnd: end, windowStart: first, windowEnd: last,
                 minimum: 30, maximum: 60, mean: 42, first: 35, last: 50, count: 8, firstObservedAt: first, lastObservedAt: last)
@@ -748,8 +748,8 @@ final class PitPilotTests: XCTestCase {
         let points = [
             point("2026-10-08T12:00:00Z", "2026-10-08T12:05:00Z", "2026-10-08T12:00:30Z", "2026-10-08T12:04:00Z"),
             point("2026-10-08T12:05:00Z", "2026-10-08T12:10:00Z", "2026-10-08T12:05:30Z", "2026-10-08T12:09:00Z"),
-            point("2026-10-08T12:15:00Z", "2026-10-08T12:20:00Z", "2026-10-08T12:15:30Z", "2026-10-08T12:19:00Z"),
-            point("2026-10-08T12:20:00Z", "2026-10-08T13:00:00Z", "2026-10-08T12:20:30Z", "2026-10-08T12:59:00Z")
+            point("2026-10-08T12:35:00Z", "2026-10-08T12:40:00Z", "2026-10-08T12:35:30Z", "2026-10-08T12:39:00Z"),
+            point("2026-10-08T12:40:00Z", "2026-10-08T13:20:00Z", "2026-10-08T12:40:30Z", "2026-10-08T13:19:00Z")
         ]
         let series = SignalHistorySeries(source: "pi", quality: "measured", statistic: "sample", points: points)
         let chart = SignalChartData(series: series, unit: "kPa", calendar: false)
@@ -760,6 +760,99 @@ final class PitPilotTests: XCTestCase {
         XCTAssertEqual(chart.vertices[0].x, try XCTUnwrap(SignalFormat.date(points[0].firstObservedAt!)).timeIntervalSince1970)
         XCTAssertEqual(chart.buckets.first?.point.minimum, 30)
         XCTAssertEqual(chart.buckets.first?.point.maximum, 60)
+    }
+
+    func testSparseDriveFixturePreservesSamplesPeaksAndActualGapsAcrossRequestedRanges() throws {
+        let now = try XCTUnwrap(SignalFormat.date("2026-02-20T12:00:00Z"))
+        for days in [1, 30] {
+            for budget in [120, 500] {
+                let from = now.addingTimeInterval(-Double(days) * 86400)
+                var url = URLComponents(string: "https://pitpilot.test/api/v1/vehicles/synthetic/signals/history")!
+                url.queryItems = [URLQueryItem(name: "metric", value: "timing_advance_deg"),
+                    URLQueryItem(name: "statistic", value: "all"), URLQueryItem(name: "from", value: ISO8601DateFormatter().string(from: from)),
+                    URLQueryItem(name: "to", value: ISO8601DateFormatter().string(from: now)), URLQueryItem(name: "maxPoints", value: String(budget))]
+                let payload = SparseDriveFixture.history(url: url.url!, now: now)
+                let history = try JSONDecoder().decode(SignalHistory.self, from: JSONSerialization.data(withJSONObject: payload))
+                let source = SparseDriveFixture.samples(metric: "timing_advance_deg", now: now).filter { $0.date >= from && $0.date <= now }
+                let points = try XCTUnwrap(history.series.first?.points)
+                XCTAssertEqual(points.compactMap(\.bucketIndex), Array(points.indices))
+                XCTAssertEqual(Set(points.map(\.id)).count, points.count)
+                XCTAssertEqual(points.reduce(0) { $0 + $1.count }, source.count)
+                XCTAssertEqual(points.count, min(budget, source.count))
+                XCTAssertTrue(points.allSatisfy { ($0.maxGapSeconds ?? .infinity) <= 4 })
+                let chart = SignalChartData(history: history, statistic: "trend")
+                XCTAssertTrue(chart.sparseVertices.isEmpty)
+                XCTAssertEqual(Set(chart.vertices.map(\.segment)).count, days == 1 ? 2 : 4)
+                XCTAssertGreaterThan(chart.vertices.count, 100)
+                XCTAssertEqual(chart.vertices.map(\.value).min(), -4)
+                XCTAssertEqual(chart.vertices.map(\.value).max(), 44)
+                for vertex in chart.vertices {
+                    XCTAssertTrue(source.contains { abs($0.date.timeIntervalSince1970 - vertex.x) < 0.01 && $0.value == vertex.value })
+                }
+                for segment in Dictionary(grouping: chart.vertices, by: \.segment).values {
+                    let ordered = segment.sorted { $0.x < $1.x }
+                    XCTAssertTrue(zip(ordered, ordered.dropFirst()).allSatisfy { $1.x - $0.x <= 900 })
+                }
+                let labels = chart.axisValues.map { chart.xLabel($0) }
+                XCTAssertEqual(Set(labels).count, labels.count)
+            }
+        }
+    }
+
+    func testObservedExtremaUseExactTimesAndConservativeInternalGapCoverage() throws {
+        func sample(maxGap: Double?) -> SignalHistoryPoint {
+            SignalHistoryPoint(bucketStart: "2026-02-18T10:00:00Z", bucketEnd: "2026-02-18T10:40:00Z",
+                windowStart: "2026-02-18T10:00:00Z", windowEnd: "2026-02-18T10:40:00Z",
+                minimum: -4, maximum: 44, mean: 18, first: 12, last: 20, count: 401,
+                firstObservedAt: "2026-02-18T10:00:00Z", lastObservedAt: "2026-02-18T10:40:00Z",
+                minimumObservedAt: "2026-02-18T10:07:00Z", maximumObservedAt: "2026-02-18T10:03:00Z", maxGapSeconds: maxGap)
+        }
+        let series = SignalHistorySeries(source: "pi", quality: "measured", statistic: "sample", points: [sample(maxGap: 6)])
+        let chart = SignalChartData(series: series, unit: "deg", calendar: false)
+        XCTAssertEqual(chart.vertices.map(\.value), [12, 44, -4, 20])
+        XCTAssertEqual(chart.vertices.map(\.x), ["10:00:00", "10:03:00", "10:07:00", "10:40:00"].map {
+            SignalFormat.date("2026-02-18T\($0)Z")!.timeIntervalSince1970
+        })
+        XCTAssertEqual(Set(chart.vertices.map(\.segment)).count, 1)
+        let gapped = SignalChartData(series: SignalHistorySeries(source: "pi", quality: "measured", statistic: "sample", points: [sample(maxGap: 1800)]), unit: "deg", calendar: false)
+        XCTAssertEqual(Set(gapped.vertices.map(\.segment)).count, gapped.vertices.count)
+        XCTAssertTrue(gapped.sparseVertices.isEmpty)
+        var legacy = sample(maxGap: nil)
+        legacy.minimumObservedAt = nil
+        legacy.maximumObservedAt = nil
+        let restored = try JSONDecoder().decode(SignalHistoryPoint.self, from: JSONEncoder().encode(legacy))
+        let oldChart = SignalChartData(series: SignalHistorySeries(source: "pi", quality: "measured", statistic: "sample", points: [restored]), unit: "deg", calendar: false)
+        XCTAssertNil(restored.maxGapSeconds)
+        XCTAssertEqual(oldChart.vertices.map(\.value), [12, 20])
+        XCTAssertEqual(oldChart.isolatedVertexIDs.count, 2)
+        let sameTime = "2026-02-18T10:00:00Z"
+        let duplicateTimes = [12.0, 20.0].enumerated().map { index, value in
+            SignalHistoryPoint(bucketStart: sameTime, bucketEnd: sameTime, windowStart: sameTime, windowEnd: sameTime,
+                minimum: value, maximum: value, mean: value, first: value, last: value, count: 1,
+                firstObservedAt: sameTime, lastObservedAt: sameTime, minimumObservedAt: sameTime, maximumObservedAt: sameTime,
+                maxGapSeconds: 0, bucketIndex: index)
+        }
+        let duplicates = SignalChartData(series: SignalHistorySeries(source: "pi", quality: "measured", statistic: "sample", points: duplicateTimes), unit: "deg", calendar: false)
+        XCTAssertEqual(Set(duplicates.buckets.map(\.id)).count, 2)
+        XCTAssertEqual(Set(duplicates.vertices.map(\.id)).count, 2)
+        XCTAssertEqual(Set(duplicates.vertices.map(\.x)).count, 1)
+        XCTAssertEqual(Set(duplicates.vertices.map(\.value)), [12, 20])
+    }
+
+    func testShortMultiDayAxisLabelsAreDistinctAndCalendarLabelsKeepDayPrecision() throws {
+        let base = try XCTUnwrap(SignalFormat.date("2026-02-18T11:30:00Z"))
+        let points = [0.0, 23 * 3600, 47 * 3600, 49 * 3600].map { offset in
+            let time = ISO8601DateFormatter().string(from: base.addingTimeInterval(offset))
+            return SignalHistoryPoint(bucketStart: time, bucketEnd: time, windowStart: time, windowEnd: time,
+                minimum: 10, maximum: 10, mean: 10, first: 10, last: 10, count: 1, firstObservedAt: time, lastObservedAt: time)
+        }
+        let chart = SignalChartData(series: SignalHistorySeries(source: "pi", quality: "measured", statistic: "sample", points: points), unit: "deg", calendar: false)
+        let labels = chart.axisValues.map { chart.xLabel($0) }
+        XCTAssertEqual(Set(labels).count, labels.count)
+        XCTAssertTrue(labels.allSatisfy { $0.contains(":") })
+        let day = SignalHistoryPoint(minimum: 10, maximum: 10, mean: 10, first: 10, last: 10, count: 1, calendarDate: "2026-02-18", timezone: "unknown")
+        let calendarChart = SignalChartData(series: SignalHistorySeries(source: "smartcar", quality: "measured", statistic: "snapshot", points: [day]), unit: "%", calendar: true)
+        XCTAssertFalse(calendarChart.xLabel(calendarChart.axisValues[0]).contains(":"))
     }
 
     func testUnknownDiagnosticsAllowOmittedCodesWithoutClaimingNoFaults() throws {
@@ -872,6 +965,29 @@ final class PitPilotTests: XCTestCase {
         XCTAssertEqual(APIClient.operation(route: "vehicles/private-id/signals/history", method: "GET"), "signals.history")
         XCTAssertEqual(APIClient.operation(route: "vehicles/private-id/signals/latest", method: "GET"), "signals.latest")
         XCTAssertNil(APIClient.operation(route: "vehicles/private-id/signals/arbitrary", method: "GET"))
+    }
+
+    @MainActor
+    func testRecentHistoryRequestsOneDayWithBoundedBudgetAndCachesItSeparately() async throws {
+        let fixture = HTTPFixture(); defer { fixture.close() }
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = GarageStore(connection: fixture.connection, cache: GarageCache(), cacheURL: directory.appendingPathComponent("garage.json"), session: fixture.session)
+        let reported = expectation(description: "Recent history telemetry completed before teardown")
+        fixture.configure(.json(Data(#"{"metric":"timing_advance_deg","unit":"deg","from":"2026-02-19T12:00:00Z","to":"2026-02-20T12:00:00Z","maxPoints":120,"series":[]}"#.utf8)), reported: reported)
+        _ = try await store.signalHistory(vehicleID: "synthetic", metric: "timing_advance_deg", statistic: "all", days: 1)
+        await fulfillment(of: [reported], timeout: 2)
+        let query = try XCTUnwrap(URLComponents(url: try XCTUnwrap(fixture.requests.first), resolvingAgainstBaseURL: false)?.queryItems)
+        let fromString = try XCTUnwrap(query.first { $0.name == "from" }?.value)
+        let toString = try XCTUnwrap(query.first { $0.name == "to" }?.value)
+        let from = try XCTUnwrap(SignalFormat.date(fromString))
+        let to = try XCTUnwrap(SignalFormat.date(toString))
+        XCTAssertEqual(to.timeIntervalSince(from), 86400)
+        XCTAssertEqual(query.first { $0.name == "maxPoints" }?.value, "120")
+        XCTAssertEqual(query.first { $0.name == "statistic" }?.value, "all")
+        XCTAssertNotNil(store.cache.signalHistory?["synthetic/timing_advance_deg/all/1"])
+        XCTAssertNil(store.cache.signalHistory?["synthetic/timing_advance_deg/all/30"])
+        XCTAssertEqual(fixture.events.first?["operation"] as? String, "signals.history")
     }
 
     func testConnectionRejectsUnsafeURLsAndMissingToken() throws {

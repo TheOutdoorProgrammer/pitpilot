@@ -90,8 +90,9 @@ Deployed acceptance passed odometer calibration and replay checks, authenticated
 
 - [x] Show or hide individual dashboard metrics per vehicle on this phone, without changing collection or stored history.
 - [x] Combine compatible imported and native readings in one chart while retaining source, quality, statistic and time precision.
-- [x] Keep missing intervals empty for rapidly changing readings; limit dotted guides to nearby, slowly changing daily snapshots.
-- [x] Default to observed readings, with explicit period-summary choices, original peak times and a 24-hour detail range.
+- [x] Keep long timestamped recording gaps empty; retain dotted guides only for calendar summaries.
+- [x] Preserve original sample peak times and offer a 24-hour detail range within the shared history chart.
+- [x] Allocate history resolution to recorded samples across sparse drives; keep sample ranges in details and short multi-day axis labels distinct.
 - [x] Preserve previously cached history during offline upgrades.
 - [x] Recover retained receiver events with preview/apply reconciliation, exact native overlap checks and immutable source archives, without inventing timestamps or distance.
 - [x] Store canonical readings from Pi and Smartcar sources with idempotent ingestion, source time, units and quality.

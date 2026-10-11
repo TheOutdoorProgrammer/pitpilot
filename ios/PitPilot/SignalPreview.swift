@@ -76,6 +76,7 @@ struct SignalMiniChart: View {
     private var tint: Color { estimated ? .cyan : PitStyle.amber }
 
     var body: some View {
+        let isolated = data.isolatedVertexIDs
         Group {
             if data.kind == .state || data.kind == .category {
                 Chart(data.stateMarks) { mark in
@@ -95,9 +96,11 @@ struct SignalMiniChart: View {
                             .foregroundStyle(LinearGradient(colors: [(vertex.estimated ? Color.cyan : PitStyle.amber).opacity(0.3), tint.opacity(0.02)], startPoint: .top, endPoint: .bottom))
                         LineMark(x: .value("Time", vertex.x), y: .value("Value", vertex.value), series: .value("Segment", vertex.segment))
                             .foregroundStyle(vertex.estimated ? .cyan : PitStyle.amber).lineStyle(StrokeStyle(lineWidth: 2, lineCap: .round))
-                        PointMark(x: .value("Time", vertex.x), y: .value("Value", vertex.value))
-                            .foregroundStyle(vertex.estimated ? .cyan : PitStyle.amber).symbolSize(data.vertices.count == 1 ? 24 : 4)
-                            .symbol(vertex.calendarDay ? BasicChartSymbolShape.square : BasicChartSymbolShape.circle)
+                        if data.vertices.count <= 30 || vertex.calendarDay || isolated.contains(vertex.id) {
+                            PointMark(x: .value("Time", vertex.x), y: .value("Value", vertex.value))
+                                .foregroundStyle(vertex.estimated ? .cyan : PitStyle.amber).symbolSize(isolated.contains(vertex.id) ? 16 : 4)
+                                .symbol(vertex.calendarDay ? BasicChartSymbolShape.square : BasicChartSymbolShape.circle)
+                        }
                     }
                     if data.kind == .bars {
                         ForEach(data.buckets) { bucket in

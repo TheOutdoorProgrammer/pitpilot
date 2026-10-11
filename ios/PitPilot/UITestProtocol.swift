@@ -146,6 +146,7 @@ final class UITestProtocol: URLProtocol {
     private static func signalDay(_ offset: Int) -> String { String(signalTime(Double(offset) * 86400).prefix(10)) }
     private static var signalLatest: [String: Any] {
         guard signals else { return ["asOf": signalTime(0), "definitions": [], "series": [], "contexts": []] }
+        if ProcessInfo.processInfo.arguments.contains("--ui-testing-sparse-drives") { return SparseDriveFixture.latest(now: signalNow) }
         return ["asOf": signalTime(0), "definitions": [
             ["metric": "fuel_level_pct", "label": "Fuel level", "unit": "%", "staleAfterSeconds": 900, "description": "Fuel remaining as a percentage of tank capacity.", "interpretation": "Slopes and movement can affect the reported level. Compare readings under similar conditions."],
             ["metric": "manifold_kpa", "label": "Manifold pressure", "unit": "kPa", "staleAfterSeconds": 900],
@@ -170,6 +171,7 @@ final class UITestProtocol: URLProtocol {
     }
 
     private static func signalHistory(_ url: URL) -> [String: Any] {
+        if ProcessInfo.processInfo.arguments.contains("--ui-testing-sparse-drives") { return SparseDriveFixture.history(url: url, now: signalNow) }
         let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
         func value(_ name: String) -> String { query.first { $0.name == name }?.value ?? "" }
         let metric = value("metric")
@@ -240,5 +242,88 @@ final class UITestProtocol: URLProtocol {
         response["series"] = [["source": metric == "fuel_level_pct" ? "lubelogger" : "pi", "quality": "measured", "statistic": statistic, "unit": unit, "points": points]]
         return response
     }
+}
+
+// Exercise sparse recording sessions against the same window and bucket budget the client requests.
+enum SparseDriveFixture {
+    struct Sample {
+        let date: Date
+        let value: Double
+    }
+
+    static func samples(metric: String, now: Date) -> [Sample] {
+        [(-172800, 60), (-93600, 80), (-7200, 620), (-900, 100)].flatMap { offset, count in
+            (0..<count).map { index in
+                let wave = sin(Double(index) * 0.13)
+                let timing = index % 97 == 45 ? 44.0 : index % 83 == 27 ? -4.0 : 18 + wave * 12
+                let speed = index % 80 < 10 ? 0.0 : 46 + wave * 30
+                return Sample(date: now.addingTimeInterval(Double(offset + index * 4)), value: metric == "speed_kph" ? speed : timing)
+            }
+        }
+    }
+
+    static func latest(now: Date) -> [String: Any] {
+        let definitions = [("timing_advance_deg", "Timing advance", "deg"), ("speed_kph", "Vehicle speed", "km/h")]
+        let series: [[String: Any]] = definitions.map { metric, _, unit in
+            let sample = samples(metric: metric, now: now).last!
+            return ["metric": metric, "unit": unit, "source": "pi", "statistic": "sample", "quality": "measured", "stale": false,
+                "latest": ["key": "synthetic-" + metric, "metric": metric, "unit": unit, "statistic": "sample", "quality": "measured",
+                           "value": sample.value, "observedAt": timestamp(sample.date)]]
+        }
+        return ["asOf": timestamp(now), "definitions": definitions.map { metric, label, unit in
+            ["metric": metric, "label": label, "unit": unit, "staleAfterSeconds": 900,
+             "description": metric == "timing_advance_deg" ? "Ignition timing advance reported for the reference cylinder." : "Vehicle speed reported at the observation time."] as [String: Any]
+        }, "series": series, "contexts": []]
+    }
+
+    static func history(url: URL, now: Date) -> [String: Any] {
+        let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+        func value(_ name: String) -> String { query.first { $0.name == name }?.value ?? "" }
+        let metric = value("metric")
+        let unit = metric == "speed_kph" ? "km/h" : "deg"
+        let budget = max(1, Int(value("maxPoints")) ?? 120)
+        let from = SignalFormat.date(value("from")) ?? now.addingTimeInterval(-30 * 86400)
+        let to = SignalFormat.date(value("to")) ?? now
+        let selected = samples(metric: metric, now: now).filter { $0.date >= from && $0.date <= to }
+        var response: [String: Any] = ["metric": metric, "unit": unit, "from": timestamp(from), "to": timestamp(to), "maxPoints": budget, "series": []]
+        guard !selected.isEmpty else { return response }
+        let gaps = (1..<selected.count).filter { selected[$0].date.timeIntervalSince(selected[$0 - 1].date) > 900 }.sorted {
+            let left = selected[$0].date.timeIntervalSince(selected[$0 - 1].date)
+            let right = selected[$1].date.timeIntervalSince(selected[$1 - 1].date)
+            return left == right ? $0 < $1 : left > right
+        }
+        let boundaries = [0] + gaps.prefix(budget - 1).sorted() + [selected.count]
+        let segments = zip(boundaries, boundaries.dropFirst()).map { Array(selected[$0..<$1]) }
+        let totalBudget = min(budget, selected.count)
+        let remaining = totalBudget - segments.count
+        let capacity = selected.count - segments.count
+        let shares = segments.map { capacity == 0 ? 0 : Double(remaining * ($0.count - 1)) / Double(capacity) }
+        var allocations = shares.map { 1 + Int($0) }
+        let remainders = shares.indices.sorted {
+            let left = shares[$0] - floor(shares[$0]), right = shares[$1] - floor(shares[$1])
+            return left == right ? $0 < $1 : left > right
+        }
+        for index in remainders.prefix(totalBudget - allocations.reduce(0, +)) { allocations[index] += 1 }
+        var points: [[String: Any]] = []
+        for (index, segment) in segments.enumerated() {
+            let groups = Dictionary(grouping: segment.indices) { $0 * allocations[index] / segment.count }
+            for key in groups.keys.sorted() {
+                let readings = groups[key]!.map { segment[$0] }
+                let first = readings.first!, last = readings.last!
+                let minimum = readings.min { $0.value < $1.value }!, maximum = readings.max { $0.value < $1.value }!
+                let maxGap = zip(readings, readings.dropFirst()).map { $1.date.timeIntervalSince($0.date) }.max() ?? 0
+                points.append(["bucketIndex": points.count, "bucketStart": timestamp(first.date), "bucketEnd": timestamp(last.date),
+                    "windowStart": timestamp(first.date), "windowEnd": timestamp(last.date),
+                    "firstObservedAt": timestamp(first.date), "lastObservedAt": timestamp(last.date),
+                    "minimumObservedAt": timestamp(minimum.date), "maximumObservedAt": timestamp(maximum.date), "maxGapSeconds": maxGap,
+                    "minimum": minimum.value, "maximum": maximum.value, "first": first.value, "last": last.value,
+                    "mean": readings.map(\.value).reduce(0, +) / Double(readings.count), "count": readings.count])
+            }
+        }
+        response["series"] = [["source": "pi", "quality": "measured", "statistic": "sample", "unit": unit, "points": points]]
+        return response
+    }
+
+    private static func timestamp(_ date: Date) -> String { ISO8601DateFormatter().string(from: date) }
 }
 #endif

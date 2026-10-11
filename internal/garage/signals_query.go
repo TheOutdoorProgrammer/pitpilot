@@ -1,6 +1,7 @@
 package garage
 
 import (
+	"container/heap"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -149,6 +150,8 @@ func (q SignalHistoryQuery) Validate() error {
 }
 
 type SignalHistoryPoint struct {
+	// BucketIndex is unique only within a response series, not an observation ID.
+	BucketIndex       *int       `json:"bucketIndex,omitempty"`
 	BucketStart       *time.Time `json:"bucketStart,omitempty"`
 	BucketEnd         *time.Time `json:"bucketEnd,omitempty"`
 	WindowStart       *time.Time `json:"windowStart,omitempty"`
@@ -208,7 +211,13 @@ func (s *Store) SignalHistory(ctx context.Context, vehicleID string, q SignalHis
 	if q.Statistic != "sample" {
 		upper = upper.Add(366 * 24 * time.Hour)
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT source,quality,data FROM signals WHERE vehicle_id=? AND metric=? AND (?='all' OR statistic=?) AND sort_time>=? AND sort_time<=? AND (?='' OR source=?) AND (?='' OR quality=?) ORDER BY sort_time,key`, vehicleID, q.Metric, q.Statistic, q.Statistic, calendarFrom.UnixMilli(), upper.UnixMilli(), q.Source, q.Source, q.Quality, q.Quality)
+	query := `SELECT source,quality,data FROM signals WHERE vehicle_id=? AND metric=? AND (?='all' OR statistic=?) AND sort_time>=? AND sort_time<=? AND (?='' OR source=?) AND (?='' OR quality=?) ORDER BY sort_time,key`
+	args := []any{vehicleID, q.Metric, q.Statistic, q.Statistic, calendarFrom.UnixMilli(), upper.UnixMilli(), q.Source, q.Source, q.Quality, q.Quality}
+	plans, err := planSignalSamples(ctx, tx, query, args, q)
+	if err != nil {
+		return out, err
+	}
+	rows, err := tx.QueryContext(ctx, query, args...)
 	if err != nil {
 		return out, err
 	}
@@ -229,22 +238,19 @@ func (s *Store) SignalHistory(ctx context.Context, vehicleID string, q SignalHis
 			rows.Close()
 			return out, err
 		}
-		if o.ObservedAt != nil && (o.ObservedAt.Before(q.From) || !o.ObservedAt.Before(q.To)) {
+		if !signalInHistory(o, q) {
 			continue
-		}
-		if o.PeriodStart != nil && (!o.PeriodStart.Before(q.To) || !o.PeriodEnd.After(q.From)) {
-			continue
-		}
-		if o.CalendarDate != "" {
-			date, _ := time.Parse("2006-01-02", o.CalendarDate)
-			if date.Before(calendarFrom) || !date.Before(q.To.UTC()) {
-				continue
-			}
 		}
 		id := source + "/" + quality + "/" + o.Statistic
 		bucket := "date/" + o.CalendarDate
 		var start, end *time.Time
-		if o.CalendarDate == "" {
+		var bucketIndex *int
+		adaptive := o.Statistic == "sample" && o.ObservedAt != nil
+		if adaptive {
+			index := plans[id].nextBucket()
+			bucketIndex = &index
+			bucket = fmt.Sprintf("sample/%06d", index)
+		} else if o.CalendarDate == "" {
 			at := time.UnixMilli(signalSortTime(o.ObservedAt, o.PeriodEnd, ""))
 			index := int(at.Sub(q.From) / width)
 			if index < 0 {
@@ -268,7 +274,7 @@ func (s *Store) SignalHistory(ctx context.Context, vehicleID string, q SignalHis
 		}
 		p := groups[id][bucket]
 		if p == nil {
-			p = &SignalHistoryPoint{BucketStart: start, BucketEnd: end, Minimum: o.Value, Maximum: o.Value, First: o.Value, CalendarDate: o.CalendarDate, Timezone: o.Timezone}
+			p = &SignalHistoryPoint{BucketIndex: bucketIndex, BucketStart: start, BucketEnd: end, Minimum: o.Value, Maximum: o.Value, First: o.Value, CalendarDate: o.CalendarDate, Timezone: o.Timezone}
 			if o.ObservedAt != nil {
 				p.MinimumObservedAt, p.MaximumObservedAt = o.ObservedAt, o.ObservedAt
 				p.MaxGapSeconds = new(float64)
@@ -314,6 +320,9 @@ func (s *Store) SignalHistory(ctx context.Context, vehicleID string, q SignalHis
 			if p.WindowEnd == nil || o.ObservedAt.After(*p.WindowEnd) {
 				p.WindowEnd = o.ObservedAt
 			}
+			if adaptive {
+				p.BucketStart, p.BucketEnd = p.FirstObservedAt, p.LastObservedAt
+			}
 		} else if o.PeriodStart != nil {
 			if p.WindowStart == nil || o.PeriodStart.Before(*p.WindowStart) {
 				p.WindowStart = o.PeriodStart
@@ -346,4 +355,154 @@ func (s *Store) SignalHistory(ctx context.Context, vehicleID string, q SignalHis
 		out.Series = append(out.Series, series)
 	}
 	return out, tx.Commit()
+}
+
+func signalInHistory(o SignalObservation, q SignalHistoryQuery) bool {
+	if o.ObservedAt != nil {
+		return !o.ObservedAt.Before(q.From) && o.ObservedAt.Before(q.To)
+	}
+	if o.PeriodStart != nil {
+		return o.PeriodStart.Before(q.To) && o.PeriodEnd.After(q.From)
+	}
+	date, _ := time.Parse("2006-01-02", o.CalendarDate)
+	calendarFrom, _ := time.Parse("2006-01-02", q.From.UTC().Format("2006-01-02"))
+	return !date.Before(calendarFrom) && date.Before(q.To.UTC())
+}
+
+type signalSampleGap struct {
+	index int
+	gap   time.Duration
+}
+
+// Retaining only the largest gaps bounds memory even when every reading is a
+// separate session. Equal gaps retain earlier boundaries deterministically.
+type signalSampleGaps []signalSampleGap
+
+func (g signalSampleGaps) Len() int { return len(g) }
+func (g signalSampleGaps) Less(i, j int) bool {
+	if g[i].gap == g[j].gap {
+		return g[i].index > g[j].index
+	}
+	return g[i].gap < g[j].gap
+}
+func (g signalSampleGaps) Swap(i, j int) { g[i], g[j] = g[j], g[i] }
+func (g *signalSampleGaps) Push(x any)   { *g = append(*g, x.(signalSampleGap)) }
+func (g *signalSampleGaps) Pop() any {
+	last := (*g)[len(*g)-1]
+	*g = (*g)[:len(*g)-1]
+	return last
+}
+
+type signalSampleSegment struct {
+	start, count, buckets, offset, remainder int
+}
+
+type signalSamplePlan struct {
+	count, seen, segment int
+	last                 time.Time
+	gaps                 signalSampleGaps
+	segments             []signalSampleSegment
+}
+
+func (p *signalSamplePlan) observe(at time.Time, budget int) {
+	gap := at.Sub(p.last)
+	if p.count > 0 && gap > 15*time.Minute && budget > 1 {
+		boundary := signalSampleGap{index: p.count, gap: gap}
+		if len(p.gaps) < budget-1 {
+			heap.Push(&p.gaps, boundary)
+		} else if gap > p.gaps[0].gap {
+			p.gaps[0] = boundary
+			heap.Fix(&p.gaps, 0)
+		}
+	}
+	p.count++
+	if at.After(p.last) {
+		p.last = at
+	}
+}
+
+func (p *signalSamplePlan) allocate(budget int) {
+	sort.Slice(p.gaps, func(i, j int) bool { return p.gaps[i].index < p.gaps[j].index })
+	start := 0
+	for _, gap := range p.gaps {
+		p.segments = append(p.segments, signalSampleSegment{start: start, count: gap.index - start, buckets: 1})
+		start = gap.index
+	}
+	p.segments = append(p.segments, signalSampleSegment{start: start, count: p.count - start, buckets: 1})
+	remaining := min(budget, p.count) - len(p.segments)
+	capacity := p.count - len(p.segments)
+	allocated := 0
+	for i := range p.segments {
+		s := &p.segments[i]
+		if capacity > 0 {
+			s.buckets += remaining * (s.count - 1) / capacity
+			s.remainder = remaining * (s.count - 1) % capacity
+		}
+		allocated += s.buckets - 1
+	}
+	order := make([]int, len(p.segments))
+	for i := range order {
+		order[i] = i
+	}
+	sort.SliceStable(order, func(i, j int) bool { return p.segments[order[i]].remainder > p.segments[order[j]].remainder })
+	for _, i := range order[:remaining-allocated] {
+		p.segments[i].buckets++
+	}
+	offset := 0
+	for i := range p.segments {
+		p.segments[i].offset = offset
+		offset += p.segments[i].buckets
+	}
+	p.gaps = nil
+}
+
+func (p *signalSamplePlan) nextBucket() int {
+	if p.seen >= p.segments[p.segment].start+p.segments[p.segment].count {
+		p.segment++
+	}
+	s := p.segments[p.segment]
+	bucket := s.offset + (p.seen-s.start)*s.buckets/s.count
+	p.seen++
+	return bucket
+}
+
+func planSignalSamples(ctx context.Context, tx *sql.Tx, query string, args []any, q SignalHistoryQuery) (map[string]*signalSamplePlan, error) {
+	// Spend the point budget on recorded samples, not empty requested time. Both
+	// passes share a read transaction and filter so concurrent ingestion cannot
+	// change segment counts between planning and reduction.
+	plans := map[string]*signalSamplePlan{}
+	if q.Statistic != "all" && q.Statistic != "sample" {
+		return plans, nil
+	}
+	rows, err := tx.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var source, quality string
+		var raw []byte
+		var o SignalObservation
+		if err := rows.Scan(&source, &quality, &raw); err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal(raw, &o); err != nil {
+			return nil, err
+		}
+		if o.Statistic != "sample" || o.ObservedAt == nil || !signalInHistory(o, q) {
+			continue
+		}
+		id := source + "/" + quality + "/" + o.Statistic
+		if plans[id] == nil {
+			plans[id] = &signalSamplePlan{}
+		}
+		plans[id].observe(*o.ObservedAt, q.MaxPoints)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	for _, plan := range plans {
+		plan.allocate(q.MaxPoints)
+	}
+	return plans, nil
 }

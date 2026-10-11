@@ -92,6 +92,10 @@ final class DisplayUnitsTests: XCTestCase {
             XCTAssertEqual(value.bucketEnd, point().bucketEnd)
             XCTAssertEqual(value.firstObservedAt, point().firstObservedAt)
             XCTAssertEqual(value.lastObservedAt, point().lastObservedAt)
+            XCTAssertEqual(value.minimumObservedAt, point().minimumObservedAt)
+            XCTAssertEqual(value.maximumObservedAt, point().maximumObservedAt)
+            XCTAssertEqual(value.maxGapSeconds, point().maxGapSeconds)
+            XCTAssertEqual(value.bucketIndex, point().bucketIndex)
         }
         XCTAssertEqual(display.series.map(\.id), original.series.map(\.id))
         XCTAssertEqual(try encoder.encode(original), before)
@@ -109,7 +113,7 @@ final class DisplayUnitsTests: XCTestCase {
         let display = raw.displayed(in: .imperial)
         let chart = SignalChartData(history: display, statistic: "trend")
         XCTAssertEqual(chart.kind, .trend)
-        XCTAssertEqual(chart.vertices.map(\.value), [68, 176])
+        XCTAssertEqual(chart.vertices.map(\.value), [68, 32, 212, 176])
         XCTAssertEqual(chart.buckets.first?.point.minimum, 32)
         XCTAssertEqual(chart.buckets.first?.point.maximum, 212)
         XCTAssertTrue(chart.yDomain(unit: display.unit).contains(32))
@@ -164,7 +168,8 @@ final class DisplayUnitsTests: XCTestCase {
         SignalHistoryPoint(bucketStart: "2026-01-01T00:00:00Z", bucketEnd: "2026-01-01T00:01:00Z",
             windowStart: "2026-01-01T00:00:00Z", windowEnd: "2026-01-01T00:01:00Z",
             minimum: 0, maximum: 100, mean: 50, first: 20, last: 80, count: 7,
-            firstObservedAt: "2026-01-01T00:00:00Z", lastObservedAt: "2026-01-01T00:01:00Z")
+            firstObservedAt: "2026-01-01T00:00:00Z", lastObservedAt: "2026-01-01T00:01:00Z",
+            minimumObservedAt: "2026-01-01T00:00:20Z", maximumObservedAt: "2026-01-01T00:00:40Z", maxGapSeconds: 10, bucketIndex: 0)
     }
 
     private func history(unit: String, series: [SignalHistorySeries]) -> SignalHistory {

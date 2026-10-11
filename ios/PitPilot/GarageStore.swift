@@ -356,7 +356,7 @@ final class GarageStore: ObservableObject {
         var recovered: [SignalHistory] = []
         // Older app versions saved each statistic separately. Reuse one range per statistic without rebucketing or writing a synthetic cache entry.
         for kind in ["sample", "snapshot", "mean", "min", "max", "sum", "count"] {
-            for range in [365, 30, 7] where range <= days {
+            for range in [365, 30, 7, 1] where range <= days {
                 guard let saved = cache.signalHistory?[historyKey(vehicleID, metric, kind, range)], saved.metric == metric,
                       let from = SignalFormat.date(saved.from), let to = SignalFormat.date(saved.to),
                       from <= now, to >= start else { continue }
