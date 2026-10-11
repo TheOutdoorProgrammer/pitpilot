@@ -848,6 +848,7 @@ final class PitPilotTests: XCTestCase {
         }
         let chart = SignalChartData(series: SignalHistorySeries(source: "pi", quality: "measured", statistic: "sample", points: points), unit: "deg", calendar: false)
         let labels = chart.axisValues.map { chart.xLabel($0) }
+        XCTAssertEqual(labels.count, 3)
         XCTAssertEqual(Set(labels).count, labels.count)
         XCTAssertTrue(labels.allSatisfy { $0.contains(":") })
         let day = SignalHistoryPoint(minimum: 10, maximum: 10, mean: 10, first: 10, last: 10, count: 1, calendarDate: "2026-02-18", timezone: "unknown")

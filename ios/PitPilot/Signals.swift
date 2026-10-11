@@ -413,8 +413,9 @@ struct SignalChartData {
         let low = buckets.first?.start ?? 0
         let high = buckets.map(\.end).max() ?? low
         if high <= low { return [low] }
-        return Array(Set((0...3).map { index in
-            let value = low + (high - low) * Double(index) / 3
+        let intervals = calendar || hasCalendarDays ? 3 : 2
+        return Array(Set((0...intervals).map { index in
+            let value = low + (high - low) * Double(index) / Double(intervals)
             return calendar ? value.rounded() : hasCalendarDays ? floor(value / 86400) * 86400 + 43200 : value
         })).sorted()
     }
