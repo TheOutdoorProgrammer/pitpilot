@@ -80,7 +80,7 @@ xcodegen generate --spec ios/project.yml
 bash scripts/test-ios.sh
 ```
 
-The Release workflow signs and stages the iOS app, then uses [Quill](https://github.com/TheOutdoorProgrammer/quill) to publish it through [Fledge](https://github.com/TheOutdoorProgrammer/fledge), build Go artifacts with GoReleaser, and publish the container. The Dockerfile copies the prebuilt Go artifacts; it never compiles Go. Release credentials and deployment endpoints are injected through repository secrets.
+The Release workflow uses [Quill](https://github.com/TheOutdoorProgrammer/quill) to build Go artifacts with GoReleaser and publish the container. By default it also tests, signs, and stages the iOS app for [Fledge](https://github.com/TheOutdoorProgrammer/fledge). For backend or collector changes that work with the installed app, set `include-ios` to `false` when dispatching the workflow. That release still runs Go race tests, vet, vulnerability checks, collector signing, and container verification, but does not build or publish an iOS app. The Dockerfile copies the prebuilt Go artifacts; it never compiles Go. Release credentials and deployment endpoints are injected through repository secrets.
 
 iOS CI and release jobs use a repository-scoped, self-hosted macOS ARM64 runner with Xcode, an installed iPhone 17 simulator runtime, XcodeGen, jq, and Ruby with Minitest. The test helper isolates build files and results per run, creates and removes its own simulator, and forwards cancellation to its child processes. Fork pull requests run backend checks; native CI runs after changes reach a trusted repository branch. Signing uses a temporary keychain and restores the runner's prior keychain state.
 

@@ -17,6 +17,10 @@ on:
         description: Build and sign without publishing or tagging
         type: boolean
         default: true
+      include-ios:
+        description: Build, test, sign, and publish the iOS app alongside the backend and collector
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -28,6 +32,7 @@ concurrency:
 
 jobs:
   ios:
+    if: ${{ inputs.include-ios }}
     runs-on: [self-hosted, macOS, ARM64, mini-2, release, pitpilot]
     timeout-minutes: 45
     concurrency:
@@ -90,6 +95,7 @@ jobs:
 
   release:
     needs: ios
+    if: ${{ always() && !cancelled() && (needs.ios.result == 'success' || (!inputs.include-ios && needs.ios.result == 'skipped')) }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -110,6 +116,7 @@ jobs:
       - name: Check reachable Go vulnerabilities
         run: go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
       - uses: actions/download-artifact@v5
+        if: ${{ inputs.include-ios }}
         with:
           name: ${{ needs.ios.outputs.artifact-name }}
           path: ${{ runner.temp }}/quill-staged
@@ -131,12 +138,12 @@ jobs:
         uses: TheOutdoorProgrammer/quill@v1
         with:
           github-token: ${{ github.token }}
-          fledge-ipa: ${{ runner.temp }}/quill-staged/PitPilot.ipa
-          fledge-server: ${{ secrets.FLEDGE_URL }}
+          fledge-ipa: ${{ inputs.include-ios && format('{0}/quill-staged/PitPilot.ipa', runner.temp) || '' }}
+          fledge-server: ${{ inputs.include-ios && secrets.FLEDGE_URL || '' }}
           bump: ${{ inputs.bump }}
           scope: ${{ inputs.scope }}
           dry-run: ${{ inputs.dry-run }}
-          publish: goreleaser,fledge,docker
+          publish: ${{ inputs.include-ios && 'goreleaser,fledge,docker' || 'goreleaser,docker' }}
           docker-images: ghcr.io/theoutdoorprogrammer/pitpilot
           docker-platforms: linux/amd64,linux/arm64
           # Snapshot outputs must never satisfy a stable image build from cache.
