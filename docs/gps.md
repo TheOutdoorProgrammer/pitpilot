@@ -8,7 +8,7 @@ The Pi refreshes recording policy every 15 seconds while connected and caches it
 
 Automatic discovery recognizes exactly one USB device with u-blox vendor `1546` and product `01a6` or `01a7`. These are documented in [Stratux's USB rules](https://raw.githubusercontent.com/stratux/stratux/master/debian/10-stratux.rules). It probes 9600, 4800, 38400 and 115200 baud by reading checksummed NMEA output. It sends no receiver commands. Multiple matching receivers require an explicit selection.
 
-[Stratux's GPS documentation](https://github.com/stratux/stratux/blob/master/docs/hardware/gps.md) identifies VK-162 revisions using u-blox 6 and 7. A model name alone does not establish the attached revision, serial path, baud, permissions or reception. Physical acceptance of the purchased receiver is still pending.
+[Stratux's GPS documentation](https://github.com/stratux/stratux/blob/master/docs/hardware/gps.md) identifies VK-162 revisions using u-blox 6 and 7. A model name alone does not establish the attached revision, serial path, baud, permissions or reception. Verify each installation using the hardware acceptance checks below.
 
 An optional `gps` object in `/etc/pitpilot/collector.json` overrides discovery. Inspect the actual device first, then supply its stable path and verified baud. For example, replace the placeholder below with the actual `/dev/serial/by-id/` link:
 
@@ -49,5 +49,17 @@ Deleting an automatic trip removes its canonical fixes and persists a recording/
 Coordinates, raw NMEA, serial paths and vehicle/device identifiers never enter operational telemetry. GPS state transitions and queue operations use bounded states and existing trace boundaries. Exports and database backups contain private location history and must be protected accordingly.
 
 ## Hardware acceptance
+
+### Home geofence and power-loss preparation
+
+An administrator can configure a paired device's optional `powerSafeZone` through `PATCH /api/v1/devices/{id}` with `latitude`, `longitude`, and `radiusMeters`. A 500-foot radius is exactly 152.4 meters. All three numbers are required; radius must be between 25 and 5,000 meters. Omitting the field preserves it, and explicit `null` removes it. This setting is available through the backend API, without requiring an app update.
+
+GPS recording must be enabled for the collector to determine whether it is inside the zone. Entry wakes the uploader from ordinary network backoff and syncs the durable queue and its directory. While a fresh fix remains inside, new readings wake an idle uploader and failed uploads retry with at most five seconds of local backoff. Server `Retry-After` always takes precedence. Successful uploads continue draining immediately. Readings are deleted only after acknowledgement, and existing per-transaction disk synchronization remains enabled everywhere, including outside the zone.
+
+A 25-meter exit margin prevents repeated entry events from boundary jitter. Fixes older than 30 seconds cannot enable priority uploads. Collection continues when entering, leaving, or parked at home; the geofence does not infer engine state, halt Linux, remount disks, alter networking, or discard readings. An extra sync barrier cannot guarantee SD-card or filesystem survival if physical power disappears during a write.
+
+The device-authenticated `GET /api/v1/device/power-policy` response is separate from the strict legacy collector configuration. The collector refreshes it every 15 seconds and persists changed policies in private, enrollment-scoped `power-policy.json` before applying them. An offline start uses that cached policy. Clearing or changing the zone takes effect when the Pi next contacts PitPilot. Older servers that do not expose this endpoint leave the cached policy intact. Home coordinates never enter logs or traces; state transitions use only bounded inside/outside values.
+
+### Receiver checks
 
 Software fixtures and cross-compilation do not prove a physical receiver works. Before declaring installation complete, verify the attached USB identity and stable path, collector-account serial access, synchronized host time, checksummed RMC/GGA output with an outdoor fix, actual authenticated delivery and a correctly timestamped map position. Then verify unplug/reconnect behavior, offline queued replay and physical power interruption without disturbing OBD or the retained receiver feed. Keep any diagnostic capture private and delete it when no longer needed.

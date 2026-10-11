@@ -10,7 +10,7 @@ These routes require the household bearer token:
 | --- | --- |
 | `POST /api/v1/vehicles/{id}/devices` | Accept `{"name":"Garage Pi"}` and return a device, one-time `enrollmentToken`, and `expiresAt` |
 | `GET /api/v1/vehicles/{id}/devices` | List enrollment, revocation, update policy, and last reported status |
-| `PATCH /api/v1/devices/{id}` | Set either or both `autoUpdate` and `gpsRecording` boolean policies |
+| `PATCH /api/v1/devices/{id}` | Set `autoUpdate`, `gpsRecording`, or the optional `powerSafeZone` policy |
 | `DELETE /api/v1/devices/{id}` | Revoke access immediately; preserve observations |
 
 Enrollment expires after 15 minutes. An enrolled or expired token cannot be reused. A vehicle supports up to 16 active or pending devices; revoke abandoned pairings before creating more. Revoking repeatedly is safe. Deleting a vehicle also removes its device authorizations.
@@ -26,12 +26,15 @@ The following routes require that collector token:
 | Method and path | Behavior |
 | --- | --- |
 | `GET /api/v1/device/config` | Return paired identity, protocol version, and update policy |
+| `GET /api/v1/device/power-policy` | Return paired identity and `powerSafeZone`, explicitly null when unconfigured |
 | `POST /api/v1/device/heartbeat` | Report bounded collector status; return 204 |
 | `POST /api/v1/device/signals` | Accept a canonical signal batch; return its original `batchId` and ingestion counts |
 
 Heartbeat fields are `version`, `queuedBatches`, `rejectedSamples`, `collectionState`, and `updateState`. Optional `lastObservedAt` and `lastUploadAt` report actual collection and acknowledged PitPilot upload times. The server records `lastSeenAt` itself. A recent heartbeat establishes contact with the collector, not ignition state or available sensor readings.
 
 GPS recording defaults to false. Optional heartbeat `gpsState` is `disabled`, `disconnected`, `waiting_clock`, `waiting_fix`, `fix`, `queue_full` or `paused`. GPS-capable collectors send `X-PitPilot-Capabilities: gps-v1`; only then does the configuration response include `gpsRecording`. Requests without this header retain the original exact configuration shape, allowing older strict decoders and their independent updater to continue working. Enrollment retains its original shape. Cached GPS policy lives in a separate private file, never in the legacy identity document. See [GPS behavior and privacy](gps.md).
+
+`powerSafeZone` accepts an object with numeric `latitude`, `longitude`, and `radiusMeters`. All three fields are required; coordinates must be in range and radius must be 25 through 5,000 meters. Use 152.4 meters for 500 feet. A PATCH that omits the field leaves it unchanged; explicit `null` clears it. The dedicated device response contains `deviceId`, `vehicleId`, and `powerSafeZone`. Its token can read only its own enrolled vehicle's policy. This endpoint does not add fields or capabilities to the original configuration or enrollment responses. Treat the zone coordinates as private location data. The collector caches this policy separately and prioritizes durable uploads near home, without powering down the Pi.
 
 Collection states: `starting`, `waiting_clock`, `collecting`, `adapter_unavailable`, `paused`, `queue_full`. Update states: `idle`, `checking`, `downloading`, `staged`, `applying`, `healthy`, `rolled_back`, `failed`, `disabled`.
 

@@ -30,6 +30,7 @@ type runtimeState struct {
 	paused     bool
 	gps        string
 	gpsEnabled bool
+	power      *powerGuard
 }
 
 func (s *runtimeState) state() (string, bool) {
@@ -71,16 +72,17 @@ func Run(ctx context.Context, c Config, version string, open OpenSampler) error 
 	if open == nil {
 		open = func(ctx context.Context) (Sampler, error) { return obd.Open(ctx, c.SerialPort, c.Baud) }
 	}
-	state := &runtimeState{collection: "starting", gpsEnabled: readGPSPolicy(c.StateDirectory, id.DeviceID)}
+	state := &runtimeState{collection: "starting", gpsEnabled: readGPSPolicy(c.StateDirectory, id.DeviceID), power: newPowerGuard(readPowerPolicy(c.StateDirectory, id))}
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	var wg sync.WaitGroup
 	wg.Add(2)
 	go func() { defer wg.Done(); collect(ctx, c, q, state, open) }()
 	go func() { defer wg.Done(); upload(ctx, q, client, state) }()
-	wg.Add(2)
+	wg.Add(3)
 	go func() { defer wg.Done(); collectGPS(ctx, c, q, state) }()
 	go func() { defer wg.Done(); refreshGPSPolicy(ctx, c.StateDirectory, id.DeviceID, client, state) }()
+	go func() { defer wg.Done(); refreshPowerPolicy(ctx, c.StateDirectory, id, client, state) }()
 	if legacyClient != nil {
 		wg.Add(1)
 		go func() { defer wg.Done(); uploadLegacy(ctx, q, legacyClient) }()
@@ -228,6 +230,7 @@ func collect(ctx context.Context, c Config, q *Queue, state *runtimeState, open 
 					slog.WarnContext(ctx, "sample rejected")
 				default:
 					state.set("collecting")
+					state.power.pending()
 				}
 			} else {
 				previousSpeed = nil
@@ -252,7 +255,7 @@ func upload(ctx context.Context, q *Queue, c *Client, state *runtimeState) {
 			return
 		}
 		if !ok {
-			if !wait(ctx, 5*time.Second) {
+			if !state.power.waitForUpload(ctx, 5*time.Second, true, false) {
 				return
 			}
 			continue
@@ -278,10 +281,13 @@ func upload(ctx context.Context, q *Queue, c *Client, state *runtimeState) {
 			return
 		}
 		sleep := delay + time.Duration(randv2.Int64N(int64(delay/4+1)))
+		if state.power.priority(time.Now()) {
+			sleep = min(sleep, 5*time.Second)
+		}
 		if httpErr != nil && httpErr.RetryAfter > sleep {
 			sleep = httpErr.RetryAfter
 		}
-		if !wait(ctx, sleep) {
+		if !state.power.waitForUpload(ctx, sleep, false, httpErr != nil && httpErr.RetryAfter > 0) {
 			return
 		}
 		delay = min(delay*2, 5*time.Minute)

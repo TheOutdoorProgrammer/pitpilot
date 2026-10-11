@@ -89,6 +89,12 @@ func OpenQueue(dir, deviceID string, limit int, legacyID ...string) (*Queue, err
 	return q, nil
 }
 func (q *Queue) Close() error { return q.db.Close() }
+func (q *Queue) Sync() error {
+	if err := q.db.Sync(); err != nil {
+		return err
+	}
+	return syncDir(filepath.Dir(q.db.Path()))
+}
 func (q *Queue) Append(b garage.SignalBatch) error {
 	return q.AppendDelivery(b, nil)
 }

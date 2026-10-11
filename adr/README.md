@@ -11,3 +11,4 @@
 | [0009](0009-recover-receiver-history-through-immutable-event-archives-an.md) | Recover receiver history through immutable event archives and transactional reconciliation | Import genuine timed readings with replay-safe archives and explicit overlap reconciliation. |
 | [0010](0010-discard-legacy-telemetry-without-deleting-live-readings.md) | Discard legacy telemetry without deleting live readings | Delete only imported telemetry with proof of ownership and prevent its replay while preserving live data. |
 | [0011](0011-receive-signed-smartcar-webhooks-alongside-bounded-polling.md) | Receive signed Smartcar webhooks alongside bounded polling | Receive signed Smartcar webhooks alongside bounded polling |
+| [0012](0012-prioritize-durable-delivery-near-a-configured-home-geofence.md) | Prioritize durable delivery near a configured home geofence | A private offline geofence accelerates uploads without inferring ignition state or shutting down the Pi. |

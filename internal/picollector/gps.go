@@ -142,6 +142,7 @@ func collectGPS(ctx context.Context, c Config, q *Queue, state *runtimeState) {
 			}
 			batch := gpsBatch(f, recording)
 			err := diag.Operation(ctx, "gps.queue.append", func(context.Context) error { return q.AppendGPS(batch) })
+			state.power.observe(ctx, q, f, time.Now())
 			if err != nil {
 				set("queue_full")
 			} else {
