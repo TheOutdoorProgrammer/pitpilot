@@ -65,7 +65,7 @@ func NewClient(server, token string, loopback bool) (*Client, error) {
 	if u.Path != "" && u.Path != "/" {
 		return nil, errors.New("server must be an origin")
 	}
-	return &Client{u, token, &http.Client{Timeout: 20 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return errors.New("redirect refused") }}}, nil
+	return &Client{u, token, &http.Client{Transport: deviceTransport(), Timeout: 20 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return errors.New("redirect refused") }}}, nil
 }
 func (c *Client) request(ctx context.Context, method, path string, body, target any, expected int) error {
 	return diag.Operation(ctx, "device"+path, func(ctx context.Context) error {
