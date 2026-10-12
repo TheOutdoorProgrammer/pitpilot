@@ -5,6 +5,84 @@ import UniformTypeIdentifiers
 @testable import PitPilot
 
 final class PitPilotTests: XCTestCase {
+    @MainActor
+    func testDashboardPreviewsBatchVisibleMetricsAndKeepDetailCacheSeparate() async throws {
+        let fixture = HTTPFixture(); defer { fixture.close() }
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appendingPathComponent("garage.json")
+        let point = SignalHistoryPoint(minimum: 0, maximum: 10, mean: 5, first: 0, last: 10, count: 100)
+        let history = SignalHistory(metric: "rpm", unit: "rpm", from: "2026-01-01T12:00:00Z", to: "2026-01-01T12:30:00Z", maxPoints: 10,
+            series: [SignalHistorySeries(source: "pi", quality: "measured", statistic: "sample", points: Array(repeating: point, count: 10), unit: "rpm")])
+        let preview = SignalPreviewEnvelope(metric: "rpm", scope: "latest_session", aggregation: "sample_mean", truncated: false, history: history)
+        var cache = GarageCache(connectionDigest: fixture.connection.cacheIdentity)
+        cache.signalHistory = ["vehicle/rpm/all/30": history]
+        cache.hiddenDashboardMetrics = ["vehicle": ["fuel_level_pct"]]
+        let store = GarageStore(connection: fixture.connection, cache: cache, cacheURL: url, session: fixture.session)
+        let reported = expectation(description: "Batch telemetry")
+        fixture.configure(.json(try JSONEncoder().encode(SignalPreviewsResponse(previews: [preview]))), reported: reported)
+        await store.refreshSignalPreviews(vehicleID: "vehicle", metrics: ["speed_kph", "rpm", "rpm", "fuel_level_pct"])
+        await fulfillment(of: [reported], timeout: 2)
+        XCTAssertEqual(fixture.requests.count, 1)
+        let request = try XCTUnwrap(fixture.requests.first)
+        XCTAssertTrue(request.path.hasSuffix("/signals/previews"))
+        let query = URLComponents(url: request, resolvingAgainstBaseURL: false)?.queryItems ?? []
+        XCTAssertEqual(query.first { $0.name == "metrics" }?.value, "rpm,speed_kph")
+        XCTAssertEqual(query.first { $0.name == "maxPoints" }?.value, "10")
+        XCTAssertEqual(store.signalPreview(vehicleID: "vehicle", metric: "rpm")?.history.series.first?.points.count, 10)
+        XCTAssertEqual(store.cache.signalHistory?.count, 1)
+        XCTAssertTrue(store.previewsRefreshing.isEmpty)
+        let saved = try JSONDecoder().decode(GarageCache.self, from: Data(contentsOf: url))
+        let offline = GarageStore(connection: fixture.connection, cache: saved, offline: true, cacheURL: url, session: fixture.session)
+        await offline.refreshSignalPreviews(vehicleID: "vehicle", metrics: ["rpm"])
+        XCTAssertNotNil(offline.signalPreview(vehicleID: "vehicle", metric: "rpm"))
+        XCTAssertEqual(fixture.requests.count, 1)
+        XCTAssertEqual(fixture.events.first?["operation"] as? String, "signals.previews")
+    }
+
+    @MainActor
+    func testAveragedAndRecordedHistoryHaveIndependentCacheAndQueryBudgets() async throws {
+        let fixture = HTTPFixture(); defer { fixture.close() }
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = GarageStore(connection: fixture.connection, cache: GarageCache(), cacheURL: directory.appendingPathComponent("garage.json"), session: fixture.session)
+        let from = try XCTUnwrap(SignalFormat.date("2026-01-01T12:00:00Z"))
+        let to = from.addingTimeInterval(1800)
+        let history = SignalHistory(metric: "rpm", unit: "rpm", from: "2026-01-01T12:00:00Z", to: "2026-01-01T12:30:00Z", maxPoints: 48, series: [])
+        let reported = expectation(description: "History telemetry"); reported.expectedFulfillmentCount = 2
+        fixture.configure(.json(try JSONEncoder().encode(history)), reported: reported)
+        _ = try await store.signalHistory(vehicleID: "vehicle", metric: "rpm", statistic: "all", days: 0, binning: "time", maxPoints: 48, from: from, to: to)
+        _ = try await store.signalHistory(vehicleID: "vehicle", metric: "rpm", statistic: "all", days: 0, from: from, to: to)
+        await fulfillment(of: [reported], timeout: 2)
+        XCTAssertEqual(store.cache.signalHistory?.count, 2)
+        XCTAssertNotNil(store.cachedSignalHistory(vehicleID: "vehicle", metric: "rpm", statistic: "all", days: 0, binning: "time", maxPoints: 48, from: from, to: to))
+        XCTAssertNotNil(store.cachedSignalHistory(vehicleID: "vehicle", metric: "rpm", statistic: "all", days: 0, from: from, to: to))
+        let query = URLComponents(url: fixture.requests[0], resolvingAgainstBaseURL: false)?.queryItems ?? []
+        XCTAssertEqual(query.first { $0.name == "binning" }?.value, "time")
+        XCTAssertEqual(query.first { $0.name == "maxPoints" }?.value, "48")
+        XCTAssertEqual(query.first { $0.name == "from" }?.value, "2026-01-01T12:00:00.000Z")
+    }
+
+    @MainActor
+    func testHistoryRevisionDiscardsPreviewsIncludingInflightResponse() async throws {
+        let fixture = HTTPFixture(); defer { fixture.close() }
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = GarageStore(connection: fixture.connection, cache: GarageCache(), cacheURL: directory.appendingPathComponent("garage.json"), session: fixture.session)
+        let started = expectation(description: "Preview request held")
+        fixture.configure(.hold, started: started)
+        let task = Task { await store.refreshSignalPreviews(vehicleID: "vehicle", metrics: ["rpm"]) }
+        await fulfillment(of: [started], timeout: 2)
+        fixture.configure(.json(Data(#"{"asOf":"2026-01-01T12:00:00Z","definitions":[],"series":[],"historyRevision":"new"}"#.utf8)))
+        await store.refreshSignals("vehicle")
+        let history = SignalHistory(metric: "rpm", unit: "rpm", from: "old", to: "old", maxPoints: 10, series: [])
+        let preview = SignalPreviewEnvelope(metric: "rpm", scope: "latest_session", aggregation: "sample_mean", truncated: false, history: history)
+        fixture.replyHeld(route: "/api/v1/vehicles/vehicle/signals/previews", data: try JSONEncoder().encode(SignalPreviewsResponse(previews: [preview])))
+        await task.value
+        XCTAssertNil(store.signalPreview(vehicleID: "vehicle", metric: "rpm"))
+        XCTAssertTrue(store.previewsRefreshing.isEmpty)
+    }
+
     func testLatestHistoryRevisionAcceptsActualOptionalWireShapes() throws {
         for suffix in ["", ",\"historyRevision\":null", ",\"historyRevision\":\"synthetic-discard-revision\""] {
             let payload = Data("{\"asOf\":\"2026-10-09T12:00:00Z\",\"definitions\":[],\"series\":[]\(suffix)}".utf8)

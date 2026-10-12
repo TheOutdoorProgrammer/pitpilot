@@ -36,6 +36,18 @@ struct SecureConnection {
     }
 }
 
+struct SignalPreviewEnvelope: Codable {
+    let metric: String
+    let scope: String
+    let aggregation: String
+    let truncated: Bool
+    let history: SignalHistory
+}
+
+struct SignalPreviewsResponse: Codable {
+    let previews: [SignalPreviewEnvelope]
+}
+
 struct GarageCache: Codable {
     static let currentSignalCacheGeneration = 1
     var vehicles: [Vehicle] = []
@@ -44,6 +56,7 @@ struct GarageCache: Codable {
     var connectionDigest: String?
     var signals: [String: LatestSignals]?
     var signalHistory: [String: SignalHistory]?
+    var signalPreviews: [String: [String: SignalPreviewEnvelope]]?
     var locations: [String: VehicleLocationEnvelope]?
     var hiddenDashboardMetrics: [String: Set<String>]?
     var signalCacheGeneration: Int? = GarageCache.currentSignalCacheGeneration
@@ -53,6 +66,7 @@ struct GarageCache: Codable {
         // Recovered historical readings used the native Pi source, so source-name filtering cannot remove every retired reading.
         signals = nil
         signalHistory = nil
+        signalPreviews = nil
         signalCacheGeneration = Self.currentSignalCacheGeneration
         return true
     }
@@ -68,6 +82,8 @@ final class GarageStore: ObservableObject {
     @Published private(set) var dashboardPreferenceError: String?
     @Published private(set) var signalErrors: [String: String] = [:]
     @Published private(set) var signalsRefreshing: Set<String> = []
+    @Published private(set) var previewsRefreshing: Set<String> = []
+    @Published private(set) var previewErrors: [String: String] = [:]
     @Published private(set) var locationsRefreshing: Set<String> = []
     @Published private(set) var locationErrors: [String: String] = [:]
     @Published private(set) var tripsPaging: Set<String> = []
@@ -78,6 +94,7 @@ final class GarageStore: ObservableObject {
     private var refreshTask: Task<[Vehicle], Error>?
     private var refreshID: UUID?
     private var signalRefreshIDs: [String: UUID] = [:]
+    private var previewRefreshIDs: [String: UUID] = [:]
     private var tripRevisions: [String: UUID] = [:]
     private var locationRevisions: [String: UUID] = [:]
     private var vehicleRevisions: [String: UUID] = [:]
@@ -163,6 +180,7 @@ final class GarageStore: ObservableObject {
         try secure.save(next)
         connection = next
         cache = GarageCache(vehicles: vehicles, updatedAt: Date(), connectionDigest: next.cacheIdentity)
+        previewRefreshIDs.removeAll(); previewsRefreshing.removeAll(); previewErrors.removeAll()
         offline = false
         error = nil
         persist()
@@ -178,6 +196,7 @@ final class GarageStore: ObservableObject {
         try secure.remove()
         connection = nil
         cache = GarageCache()
+        previewRefreshIDs.removeAll(); previewsRefreshing.removeAll(); previewErrors.removeAll()
         offline = false
         error = nil
         signalErrors = [:]
@@ -213,6 +232,7 @@ final class GarageStore: ObservableObject {
             let ids = Set(cache.vehicles.map(\.id))
             cache.details = cache.details.filter { ids.contains($0.key) }
             cache.signals = cache.signals?.filter { ids.contains($0.key) }
+            cache.signalPreviews = cache.signalPreviews?.filter { ids.contains($0.key) }
             cache.locations = cache.locations?.filter { ids.contains($0.key) }
             cache.hiddenDashboardMetrics = cache.hiddenDashboardMetrics?.filter { ids.contains($0.key) }
             cache.signalHistory = cache.signalHistory?.filter { key, _ in ids.contains(String(key.split(separator: "/", maxSplits: 1).first ?? "")) }
@@ -263,6 +283,9 @@ final class GarageStore: ObservableObject {
             guard isCurrent(client), signalRefreshIDs[id] == requestID else { return }
             if cache.signals?[id]?.historyRevision != response.historyRevision {
                 cache.signalHistory = cache.signalHistory?.filter { !$0.key.hasPrefix(id + "/") }
+                cache.signalPreviews?.removeValue(forKey: id)
+                previewRefreshIDs.removeValue(forKey: id)
+                previewsRefreshing.remove(id)
             }
             if cache.signals == nil { cache.signals = [:] }
             cache.signals?[id] = response
@@ -346,8 +369,64 @@ final class GarageStore: ObservableObject {
         cache.signals?[vehicleID]?.contexts?.removeAll { $0.source == "pi" && $0.context.location?.type == "gps" }
     }
 
-    func cachedSignalHistory(vehicleID: String, metric: String, statistic: String, days: Int, now: Date = Date()) -> SignalHistory? {
-        if let saved = cache.signalHistory?[historyKey(vehicleID, metric, statistic, days)] { return saved }
+    func signalPreview(vehicleID: String, metric: String) -> SignalPreviewEnvelope? {
+        cache.signalPreviews?[vehicleID]?[metric]
+    }
+
+    func refreshSignalPreviews(vehicleID: String, metrics: [String]) async {
+        guard !Task.isCancelled, !offline, let client else { return }
+        let requested = Array(Set(metrics.filter { dashboardMetricVisible($0, vehicleID: vehicleID) })).sorted()
+        guard !requested.isEmpty else { return }
+        let requestID = UUID()
+        let vehicleRevision = vehicleRevisions[vehicleID]
+        let historyRevision = cache.signals?[vehicleID]?.historyRevision
+        previewRefreshIDs[vehicleID] = requestID
+        previewsRefreshing.insert(vehicleID)
+        defer {
+            if previewRefreshIDs[vehicleID] == requestID {
+                previewRefreshIDs.removeValue(forKey: vehicleID)
+                previewsRefreshing.remove(vehicleID)
+            }
+        }
+        do {
+            var previews: [String: SignalPreviewEnvelope] = [:]
+            for start in stride(from: 0, to: requested.count, by: 32) {
+                try Task.checkCancellation()
+                let metrics = Array(requested[start..<min(start + 32, requested.count)])
+                let response: SignalPreviewsResponse = try await client.request("vehicles/\(vehicleID)/signals/previews", query: [
+                    URLQueryItem(name: "metrics", value: metrics.joined(separator: ",")),
+                    URLQueryItem(name: "maxPoints", value: "10")
+                ])
+                for preview in response.previews where metrics.contains(preview.metric) {
+                    guard preview.history.metric == preview.metric,
+                          preview.history.series.reduce(0, { $0 + $1.points.count }) <= 10 else {
+                        throw APIError.message("The server returned an oversized chart preview.")
+                    }
+                    previews[preview.metric] = preview
+                }
+            }
+            try Task.checkCancellation()
+            guard isCurrent(client), previewRefreshIDs[vehicleID] == requestID,
+                  vehicleRevisions[vehicleID] == vehicleRevision,
+                  cache.signals?[vehicleID]?.historyRevision == historyRevision else { return }
+            if cache.signalPreviews == nil { cache.signalPreviews = [:] }
+            var saved = cache.signalPreviews?[vehicleID] ?? [:]
+            for metric in requested { saved.removeValue(forKey: metric) }
+            saved.merge(previews) { _, new in new }
+            cache.signalPreviews?[vehicleID] = saved
+            previewErrors.removeValue(forKey: vehicleID)
+            persist()
+        } catch is CancellationError {
+        } catch {
+            if isCurrent(client), previewRefreshIDs[vehicleID] == requestID {
+                previewErrors[vehicleID] = error.localizedDescription
+            }
+        }
+    }
+
+    func cachedSignalHistory(vehicleID: String, metric: String, statistic: String, days: Int, now: Date = Date(), binning: String = "adaptive", maxPoints: Int = 120, from: Date? = nil, to: Date? = nil) -> SignalHistory? {
+        if let saved = cache.signalHistory?[historyKey(vehicleID, metric, statistic, days, binning: binning, maxPoints: maxPoints, from: from, to: to)] { return saved }
+        guard binning == "adaptive", maxPoints == 120, from == nil, to == nil else { return nil }
         guard statistic == "all", days > 0 else { return nil }
         let start = now.addingTimeInterval(-Double(days) * 86400)
         let formatter = ISO8601DateFormatter()
@@ -386,29 +465,39 @@ final class GarageStore: ObservableObject {
             maxPoints: recovered.map(\.maxPoints).max()!, series: recovered.flatMap(\.series))
     }
 
-    func signalHistory(vehicleID: String, metric: String, statistic: String, days: Int) async throws -> SignalHistory {
+    func signalHistory(vehicleID: String, metric: String, statistic: String, days: Int, binning: String = "adaptive", maxPoints: Int = 120, from: Date? = nil, to: Date? = nil) async throws -> SignalHistory {
         guard let client else { throw APIError.message("Connect to your server first.") }
         let revision = vehicleRevisions[vehicleID]
         let historyRevision = cache.signals?[vehicleID]?.historyRevision
-        let end = Date()
-        let start = end.addingTimeInterval(-Double(days) * 86400)
+        let end = to ?? Date()
+        let start = from ?? end.addingTimeInterval(-Double(days) * 86400)
         let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let lowerBound = Date(timeIntervalSince1970: (start.timeIntervalSince1970 * 1000).rounded(.down) / 1000)
+        let upperBound = Date(timeIntervalSince1970: (end.timeIntervalSince1970 * 1000).rounded(.up) / 1000)
         let response: SignalHistory = try await client.request("vehicles/\(vehicleID)/signals/history", query: [
             URLQueryItem(name: "metric", value: metric), URLQueryItem(name: "statistic", value: statistic),
-            URLQueryItem(name: "from", value: formatter.string(from: start)), URLQueryItem(name: "to", value: formatter.string(from: end)),
-            URLQueryItem(name: "maxPoints", value: "120")
+            URLQueryItem(name: "from", value: formatter.string(from: lowerBound)), URLQueryItem(name: "to", value: formatter.string(from: upperBound)),
+            URLQueryItem(name: "maxPoints", value: String(maxPoints)), URLQueryItem(name: "binning", value: binning)
         ])
         try Task.checkCancellation()
         guard isCurrent(client), vehicleRevisions[vehicleID] == revision,
               cache.signals?[vehicleID]?.historyRevision == historyRevision else { throw CancellationError() }
         if cache.signalHistory == nil { cache.signalHistory = [:] }
-        cache.signalHistory?[historyKey(vehicleID, metric, statistic, days)] = response
+        if days == 0 {
+            let prefix = [vehicleID, metric, statistic, "0", binning, String(maxPoints)].joined(separator: "/") + "/"
+            cache.signalHistory = cache.signalHistory?.filter { !$0.key.hasPrefix(prefix) }
+        }
+        cache.signalHistory?[historyKey(vehicleID, metric, statistic, days, binning: binning, maxPoints: maxPoints, from: from, to: to)] = response
         persist()
         return response
     }
 
-    private func historyKey(_ vehicle: String, _ metric: String, _ statistic: String, _ days: Int) -> String {
-        [vehicle, metric, statistic, String(days)].joined(separator: "/")
+    private func historyKey(_ vehicle: String, _ metric: String, _ statistic: String, _ days: Int, binning: String = "adaptive", maxPoints: Int = 120, from: Date? = nil, to: Date? = nil) -> String {
+        let base = [vehicle, metric, statistic, String(days)].joined(separator: "/")
+        if binning == "adaptive", maxPoints == 120, from == nil, to == nil { return base }
+        let scope = days == 0 ? "/\(from?.timeIntervalSince1970 ?? 0)/\(to?.timeIntervalSince1970 ?? 0)" : ""
+        return "\(base)/\(binning)/\(maxPoints)\(scope)"
     }
 
     @discardableResult
@@ -447,12 +536,15 @@ final class GarageStore: ObservableObject {
         // Replies started before deletion cannot restore private history or resurrect the vehicle in the garage.
         vehicleRevisions[id] = UUID(); tripRevisions[id] = UUID(); locationRevisions[id] = UUID()
         signalRefreshIDs.removeValue(forKey: id)
+        previewRefreshIDs.removeValue(forKey: id)
+        previewsRefreshing.remove(id); previewErrors.removeValue(forKey: id)
         signalsRefreshing.remove(id); locationsRefreshing.remove(id); tripsPaging.remove(id)
         tripsHaveMore.removeValue(forKey: id); locationErrors.removeValue(forKey: id)
         refreshID = nil; refreshTask?.cancel(); refreshTask = nil; refreshing = false
         cache.vehicles.removeAll { $0.id == id }
         cache.details.removeValue(forKey: id)
         cache.signals?.removeValue(forKey: id)
+        cache.signalPreviews?.removeValue(forKey: id)
         cache.locations?.removeValue(forKey: id)
         cache.hiddenDashboardMetrics?.removeValue(forKey: id)
         cache.signalHistory = cache.signalHistory?.filter { !$0.key.hasPrefix(id + "/") }

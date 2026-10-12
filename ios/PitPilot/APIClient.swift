@@ -164,7 +164,7 @@ struct APIClient {
             }
         }
         if parts.count == 4, parts[0] == "vehicles", parts[2] == "signals", method == "GET" {
-            switch parts[3] { case "latest": return "signals.latest"; case "history": return "signals.history"; default: return nil }
+            switch parts[3] { case "latest": return "signals.latest"; case "history": return "signals.history"; case "previews": return "signals.previews"; default: return nil }
         }
         if parts.count == 1 && parts[0] == "vehicles" { return method == "GET" ? "vehicles.list" : method == "POST" ? "vehicle.create" : nil }
         if parts.count == 2 {
