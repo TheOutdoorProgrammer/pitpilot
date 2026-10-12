@@ -113,6 +113,7 @@ func (s *Store) LatestSignals(ctx context.Context, vehicleID string) (out Latest
 
 type SignalHistoryQuery struct {
 	Metric, Statistic, Source, Quality string
+	Binning                            string
 	From, To                           time.Time
 	MaxPoints                          int
 }
@@ -129,6 +130,9 @@ func signalObservationTime(o SignalObservation) time.Time {
 }
 
 func (q SignalHistoryQuery) Validate() error {
+	if q.Binning != "" && q.Binning != "adaptive" && q.Binning != "time" {
+		return errors.New("invalid history binning")
+	}
 	if _, ok := signalUnit(q.Metric, q.Statistic); !ok {
 		return errors.New("unknown signal metric")
 	}
@@ -213,9 +217,12 @@ func (s *Store) SignalHistory(ctx context.Context, vehicleID string, q SignalHis
 	}
 	query := `SELECT source,quality,data FROM signals WHERE vehicle_id=? AND metric=? AND (?='all' OR statistic=?) AND sort_time>=? AND sort_time<=? AND (?='' OR source=?) AND (?='' OR quality=?) ORDER BY sort_time,key`
 	args := []any{vehicleID, q.Metric, q.Statistic, q.Statistic, calendarFrom.UnixMilli(), upper.UnixMilli(), q.Source, q.Source, q.Quality, q.Quality}
-	plans, err := planSignalSamples(ctx, tx, query, args, q)
-	if err != nil {
-		return out, err
+	var plans map[string]*signalSamplePlan
+	if q.Binning != "time" {
+		plans, err = planSignalSamples(ctx, tx, query, args, q)
+		if err != nil {
+			return out, err
+		}
 	}
 	rows, err := tx.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -245,13 +252,16 @@ func (s *Store) SignalHistory(ctx context.Context, vehicleID string, q SignalHis
 		bucket := "date/" + o.CalendarDate
 		var start, end *time.Time
 		var bucketIndex *int
-		adaptive := o.Statistic == "sample" && o.ObservedAt != nil
+		adaptive := q.Binning != "time" && o.Statistic == "sample" && o.ObservedAt != nil
 		if adaptive {
 			index := plans[id].nextBucket()
 			bucketIndex = &index
 			bucket = fmt.Sprintf("sample/%06d", index)
 		} else if o.CalendarDate == "" {
 			at := time.UnixMilli(signalSortTime(o.ObservedAt, o.PeriodEnd, ""))
+			if q.Binning == "time" {
+				at = signalObservationTime(o)
+			}
 			index := int(at.Sub(q.From) / width)
 			if index < 0 {
 				index = 0
@@ -281,56 +291,7 @@ func (s *Store) SignalHistory(ctx context.Context, vehicleID string, q SignalHis
 			}
 			groups[id][bucket] = p
 		}
-		if o.Value < p.Minimum || (o.Value == p.Minimum && o.ObservedAt != nil && p.MinimumObservedAt != nil && o.ObservedAt.Before(*p.MinimumObservedAt)) {
-			p.Minimum = o.Value
-			p.MinimumObservedAt = o.ObservedAt
-		}
-		if o.Value > p.Maximum || (o.Value == p.Maximum && o.ObservedAt != nil && p.MaximumObservedAt != nil && o.ObservedAt.Before(*p.MaximumObservedAt)) {
-			p.Maximum = o.Value
-			p.MaximumObservedAt = o.ObservedAt
-		}
-		p.Count++
-		p.Mean += (o.Value - p.Mean) / float64(p.Count)
-		if o.ObservedAt == nil {
-			p.Last = o.Value
-		}
-		if o.ObservedAt != nil {
-			// The index orders milliseconds. Ties may arrive out of nanosecond order,
-			// so this high-water gap conservatively overstates a gap by at most 1 ms.
-			if p.LastObservedAt != nil {
-				gap := o.ObservedAt.Sub(*p.LastObservedAt).Seconds()
-				if gap < 0 {
-					gap = -gap
-				}
-				if gap > *p.MaxGapSeconds {
-					*p.MaxGapSeconds = gap
-				}
-			}
-			if p.FirstObservedAt == nil || o.ObservedAt.Before(*p.FirstObservedAt) {
-				p.FirstObservedAt = o.ObservedAt
-				p.First = o.Value
-			}
-			if p.LastObservedAt == nil || !o.ObservedAt.Before(*p.LastObservedAt) {
-				p.LastObservedAt = o.ObservedAt
-				p.Last = o.Value
-			}
-			if p.WindowStart == nil || o.ObservedAt.Before(*p.WindowStart) {
-				p.WindowStart = o.ObservedAt
-			}
-			if p.WindowEnd == nil || o.ObservedAt.After(*p.WindowEnd) {
-				p.WindowEnd = o.ObservedAt
-			}
-			if adaptive {
-				p.BucketStart, p.BucketEnd = p.FirstObservedAt, p.LastObservedAt
-			}
-		} else if o.PeriodStart != nil {
-			if p.WindowStart == nil || o.PeriodStart.Before(*p.WindowStart) {
-				p.WindowStart = o.PeriodStart
-			}
-			if p.WindowEnd == nil || o.PeriodEnd.After(*p.WindowEnd) {
-				p.WindowEnd = o.PeriodEnd
-			}
-		}
+		accumulateSignalHistory(p, o, adaptive)
 	}
 	err = rows.Err()
 	rows.Close()
@@ -355,6 +316,59 @@ func (s *Store) SignalHistory(ctx context.Context, vehicleID string, q SignalHis
 		out.Series = append(out.Series, series)
 	}
 	return out, tx.Commit()
+}
+
+func accumulateSignalHistory(p *SignalHistoryPoint, o SignalObservation, adaptive bool) {
+	if o.Value < p.Minimum || (o.Value == p.Minimum && o.ObservedAt != nil && p.MinimumObservedAt != nil && o.ObservedAt.Before(*p.MinimumObservedAt)) {
+		p.Minimum = o.Value
+		p.MinimumObservedAt = o.ObservedAt
+	}
+	if o.Value > p.Maximum || (o.Value == p.Maximum && o.ObservedAt != nil && p.MaximumObservedAt != nil && o.ObservedAt.Before(*p.MaximumObservedAt)) {
+		p.Maximum = o.Value
+		p.MaximumObservedAt = o.ObservedAt
+	}
+	p.Count++
+	p.Mean += (o.Value - p.Mean) / float64(p.Count)
+	if o.ObservedAt == nil {
+		p.Last = o.Value
+	}
+	if o.ObservedAt != nil {
+		// The index orders milliseconds. Ties may arrive out of nanosecond order,
+		// so this high-water gap conservatively overstates a gap by at most 1 ms.
+		if p.LastObservedAt != nil {
+			gap := o.ObservedAt.Sub(*p.LastObservedAt).Seconds()
+			if gap < 0 {
+				gap = -gap
+			}
+			if gap > *p.MaxGapSeconds {
+				*p.MaxGapSeconds = gap
+			}
+		}
+		if p.FirstObservedAt == nil || o.ObservedAt.Before(*p.FirstObservedAt) {
+			p.FirstObservedAt = o.ObservedAt
+			p.First = o.Value
+		}
+		if p.LastObservedAt == nil || !o.ObservedAt.Before(*p.LastObservedAt) {
+			p.LastObservedAt = o.ObservedAt
+			p.Last = o.Value
+		}
+		if p.WindowStart == nil || o.ObservedAt.Before(*p.WindowStart) {
+			p.WindowStart = o.ObservedAt
+		}
+		if p.WindowEnd == nil || o.ObservedAt.After(*p.WindowEnd) {
+			p.WindowEnd = o.ObservedAt
+		}
+		if adaptive {
+			p.BucketStart, p.BucketEnd = p.FirstObservedAt, p.LastObservedAt
+		}
+	} else if o.PeriodStart != nil {
+		if p.WindowStart == nil || o.PeriodStart.Before(*p.WindowStart) {
+			p.WindowStart = o.PeriodStart
+		}
+		if p.WindowEnd == nil || o.PeriodEnd.After(*p.WindowEnd) {
+			p.WindowEnd = o.PeriodEnd
+		}
+	}
 }
 
 func signalInHistory(o SignalObservation, q SignalHistoryQuery) bool {

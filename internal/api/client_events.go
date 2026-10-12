@@ -11,14 +11,14 @@ import (
 )
 
 var clientOperations = map[string]bool{
-	"settings.units": true,
+	"settings.units":       true,
 	"vehicle.location.get": true, "vehicle.location.delete": true,
 	"vehicles.list": true, "vehicle.get": true, "vehicle.create": true, "vehicle.update": true, "vehicle.delete": true,
 	"vehicle.photo.get": true, "vehicle.photo.put": true, "vehicle.photo.delete": true,
 	"records.list": true, "record.create": true, "record.update": true, "record.delete": true,
 	"reminders.list": true, "reminder.create": true, "reminder.update": true, "reminder.delete": true,
 	"trips.list": true, "trip.create": true, "trip.delete": true, "export.get": true,
-	"signals.latest": true, "signals.history": true, "signals.catalog": true,
+	"signals.latest": true, "signals.history": true, "signals.previews": true, "signals.catalog": true,
 	"devices.list": true, "device.create": true, "device.update": true, "device.revoke": true,
 	"smartcar.configuration": true, "smartcar.status": true, "smartcar.session.create": true,
 	"smartcar.session.complete": true, "smartcar.session.bind": true, "smartcar.sync": true, "smartcar.disconnect": true,
