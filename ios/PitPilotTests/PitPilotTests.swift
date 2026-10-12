@@ -1083,7 +1083,9 @@ final class PitPilotTests: XCTestCase {
         let toString = try XCTUnwrap(query.first { $0.name == "to" }?.value)
         let from = try XCTUnwrap(SignalFormat.date(fromString))
         let to = try XCTUnwrap(SignalFormat.date(toString))
-        XCTAssertEqual(to.timeIntervalSince(from), 86400)
+        // Outward millisecond rounding retains observations at either query boundary.
+        XCTAssertGreaterThanOrEqual(to.timeIntervalSince(from), 86400 - 0.000001)
+        XCTAssertLessThanOrEqual(to.timeIntervalSince(from), 86400.001001)
         XCTAssertEqual(query.first { $0.name == "maxPoints" }?.value, "120")
         XCTAssertEqual(query.first { $0.name == "statistic" }?.value, "all")
         XCTAssertNotNil(store.cache.signalHistory?["synthetic/timing_advance_deg/all/1"])
