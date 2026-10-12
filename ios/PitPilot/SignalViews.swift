@@ -330,7 +330,7 @@ private struct SignalSeriesChart: View {
         if data.kind == .bars {
             return data.buckets.contains { $0.point.count > 1 } ? "Average per bucket · whiskers show range" : SignalFormat.statistic(data.statistic)
         }
-        if data.presentation == .averaged { return "\(data.averagingIntervalLabel.capitalized) averages · recorded samples only" }
+        if data.presentation == .averaged { return "\(data.averagingIntervalLabel.capitalized) averages · recorded values only" }
         if data.hasCalendarDays { return "Squares show daily summaries · gaps in samples stay empty" }
         if data.statistic == "trend" { return "Recorded readings · gaps show missing coverage" }
         let statistic = SignalFormat.statistic(data.statistic)
