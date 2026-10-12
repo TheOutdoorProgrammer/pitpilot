@@ -434,8 +434,8 @@ struct SignalChartData {
             return end.timeIntervalSince(start)
         }
         guard let seconds = widths.max() else { return "period" }
-        if seconds >= 86400, seconds.truncatingRemainder(dividingBy: 86400) == 0 { return "\(Int(seconds / 86400))-day" }
-        if seconds >= 3600, seconds.truncatingRemainder(dividingBy: 3600) == 0 { return "\(Int(seconds / 3600))-hour" }
+        if seconds >= 86400 { return "\((seconds / 86400).formatted(.number.precision(.fractionLength(0...1))))-day" }
+        if seconds >= 3600 { return "\((seconds / 3600).formatted(.number.precision(.fractionLength(0...1))))-hour" }
         if seconds >= 60 { return "\((seconds / 60).formatted(.number.precision(.fractionLength(0...1))))-minute" }
         return "\(max(1, Int(seconds.rounded())))-second"
     }
