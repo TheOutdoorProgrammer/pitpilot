@@ -99,6 +99,7 @@ final class UITestProtocol: URLProtocol {
         else if route == "/api/v1/trips/test-trip", request.httpMethod == "DELETE" { Self.trips.removeAll(); code = 204 }
         else if let fixture = IntegrationFixture.reply(route: route, method: request.httpMethod ?? "GET", body: body) { code = fixture.0; response = fixture.1 }
         else if route.hasSuffix("/signals/latest") { response = Self.signalLatest }
+        else if route.hasSuffix("/signals/previews") { response = Self.signalPreviews(request.url!) }
         else if route.hasSuffix("/signals/history") {
             if ProcessInfo.processInfo.arguments.contains("--ui-testing-history-error") { code = 503; response = ["error": "Synthetic unavailable"] }
             else { response = Self.signalHistory(request.url!) }
@@ -141,11 +142,12 @@ final class UITestProtocol: URLProtocol {
     }
     override func stopLoading() {}
 
-    private static let signalNow = Date()
+    private static let signalNow = Date(timeIntervalSince1970: floor(Date().timeIntervalSince1970))
     private static func signalTime(_ offset: TimeInterval) -> String { ISO8601DateFormatter().string(from: signalNow.addingTimeInterval(offset)) }
     private static func signalDay(_ offset: Int) -> String { String(signalTime(Double(offset) * 86400).prefix(10)) }
     private static var signalLatest: [String: Any] {
         guard signals else { return ["asOf": signalTime(0), "definitions": [], "series": [], "contexts": []] }
+        if ProcessInfo.processInfo.arguments.contains("--ui-testing-dense-drive") { return SparseDriveFixture.latest(now: signalNow, dense: true) }
         if ProcessInfo.processInfo.arguments.contains("--ui-testing-sparse-drives") { return SparseDriveFixture.latest(now: signalNow) }
         return ["asOf": signalTime(0), "definitions": [
             ["metric": "fuel_level_pct", "label": "Fuel level", "unit": "%", "staleAfterSeconds": 900, "description": "Fuel remaining as a percentage of tank capacity.", "interpretation": "Slopes and movement can affect the reported level. Compare readings under similar conditions."],
@@ -171,13 +173,14 @@ final class UITestProtocol: URLProtocol {
     }
 
     private static func signalHistory(_ url: URL) -> [String: Any] {
+        if ProcessInfo.processInfo.arguments.contains("--ui-testing-dense-drive") { return SparseDriveFixture.history(url: url, now: signalNow, dense: true) }
         if ProcessInfo.processInfo.arguments.contains("--ui-testing-sparse-drives") { return SparseDriveFixture.history(url: url, now: signalNow) }
         let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
         func value(_ name: String) -> String { query.first { $0.name == name }?.value ?? "" }
         let metric = value("metric")
         let statistic = value("statistic")
         let unit = ["fuel_level_pct": "%", "mil_on": "boolean", "fuel_system_1_status": "code", "retained_samples": "count"][metric] ?? "kPa"
-        var response: [String: Any] = ["metric": metric, "unit": unit, "from": value("from"), "to": value("to"), "maxPoints": 120, "series": []]
+        var response: [String: Any] = ["metric": metric, "unit": unit, "from": value("from"), "to": value("to"), "maxPoints": Int(value("maxPoints")) ?? 120, "series": []]
         if ProcessInfo.processInfo.arguments.contains("--ui-testing-history-empty") { return response }
         if statistic == "all" {
             let statistics = metric == "fuel_level_pct" ? ["snapshot"] : metric == "manifold_kpa" ? ["sample", "max"] : metric == "retained_samples" ? ["sum"] : ["sample"]
@@ -242,6 +245,71 @@ final class UITestProtocol: URLProtocol {
         response["series"] = [["source": metric == "fuel_level_pct" ? "lubelogger" : "pi", "quality": "measured", "statistic": statistic, "unit": unit, "points": points]]
         return response
     }
+
+    private static func signalPreviews(_ url: URL) -> [String: Any] {
+        let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+        let metrics = query.first { $0.name == "metrics" }?.value?.split(separator: ",").map(String.init) ?? []
+        let budget = min(10, max(1, Int(query.first { $0.name == "maxPoints" }?.value ?? "") ?? 10))
+        let dense = ProcessInfo.processInfo.arguments.contains("--ui-testing-dense-drive")
+        let drive = dense || ProcessInfo.processInfo.arguments.contains("--ui-testing-sparse-drives")
+        let previews: [[String: Any]] = metrics.map { metric in
+            let formatter = ISO8601DateFormatter()
+            formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            var from = signalNow.addingTimeInterval(-30 * 86400)
+            var to = signalNow
+            var truncated = false
+            let slow = ["fuel_level_pct", "retained_samples"].contains(metric)
+            if drive {
+                let samples = dense ? DenseDriveFixture.samples(metric: metric, now: signalNow) : SparseDriveFixture.samples(metric: metric, now: signalNow)
+                let boundary = samples.indices.dropFirst().last { samples[$0].date.timeIntervalSince(samples[$0 - 1].date) > 900 } ?? 0
+                let session = Array(samples[boundary...])
+                truncated = session.count > 512
+                from = session.suffix(512).first!.date
+                to = session.last!.date.addingTimeInterval(0.001)
+            }
+            var components = URLComponents(url: url, resolvingAgainstBaseURL: false)!
+            components.queryItems = [URLQueryItem(name: "metric", value: metric), URLQueryItem(name: "statistic", value: "all"),
+                URLQueryItem(name: "from", value: formatter.string(from: from)), URLQueryItem(name: "to", value: formatter.string(from: to)),
+                URLQueryItem(name: "maxPoints", value: String(budget)), URLQueryItem(name: "binning", value: "time")]
+            var history = signalHistory(components.url!)
+            let series = history["series"] as? [[String: Any]] ?? []
+            func lastDate(_ item: [String: Any]) -> String {
+                let point = (item["points"] as? [[String: Any]])?.last ?? [:]
+                return point["lastObservedAt"] as? String ?? point["windowEnd"] as? String ?? point["calendarDate"] as? String ?? ""
+            }
+            var selected = series.filter { !(($0["points"] as? [[String: Any]]) ?? []).isEmpty }.max { lastDate($0) < lastDate($1) }
+            if var item = selected, let points = item["points"] as? [[String: Any]], points.count > budget {
+                // The legacy fixture contains pre-aggregated points, so merge counts rather than averaging its averages.
+                let groups = Dictionary(grouping: points.indices) { $0 * budget / points.count }
+                item["points"] = groups.keys.sorted().map { key -> [String: Any] in
+                    let values = groups[key]!.map { points[$0] }
+                    var point = values.first!
+                    let count = values.reduce(0) { $0 + (($1["count"] as? Int) ?? 1) }
+                    point["bucketIndex"] = key
+                    point["count"] = count
+                    point["mean"] = values.reduce(0.0) { $0 + (($1["mean"] as? Double) ?? 0) * Double(($1["count"] as? Int) ?? 1) } / Double(count)
+                    point["minimum"] = values.compactMap { $0["minimum"] as? Double }.min()
+                    point["maximum"] = values.compactMap { $0["maximum"] as? Double }.max()
+                    for field in ["bucketEnd", "windowEnd", "lastObservedAt", "last"] { point[field] = values.last![field] }
+                    return point
+                }
+                selected = item
+            }
+            history["series"] = selected.map { [$0] } ?? []
+            if let points = selected?["points"] as? [[String: Any]],
+               let first = points.first, let last = points.last,
+               let start = first["firstObservedAt"] as? String ?? first["windowStart"] as? String,
+               let end = last["lastObservedAt"] as? String ?? last["windowEnd"] as? String {
+                history["from"] = start
+                history["to"] = SignalFormat.date(end).map { formatter.string(from: $0.addingTimeInterval(0.001)) } ?? end
+            }
+            if drive { history["from"] = formatter.string(from: from); history["to"] = formatter.string(from: to) }
+            let discrete = ["mil_on", "fuel_system_1_status", "retained_samples"].contains(metric)
+            return ["metric": metric, "scope": selected == nil ? "empty" : slow ? "recent_trend" : "latest_session",
+                "aggregation": discrete ? "last" : "sample_mean", "selection": "latest_series", "truncated": truncated, "history": history]
+        }
+        return ["asOf": signalTime(0), "previews": previews]
+    }
 }
 
 // Exercise sparse recording sessions against the same window and bucket budget the client requests.
@@ -262,10 +330,10 @@ enum SparseDriveFixture {
         }
     }
 
-    static func latest(now: Date) -> [String: Any] {
+    static func latest(now: Date, dense: Bool = false) -> [String: Any] {
         let definitions = [("timing_advance_deg", "Timing advance", "deg"), ("speed_kph", "Vehicle speed", "km/h")]
         let series: [[String: Any]] = definitions.map { metric, _, unit in
-            let sample = samples(metric: metric, now: now).last!
+            let sample = (dense ? DenseDriveFixture.samples(metric: metric, now: now) : samples(metric: metric, now: now)).last!
             return ["metric": metric, "unit": unit, "source": "pi", "statistic": "sample", "quality": "measured", "stale": false,
                 "latest": ["key": "synthetic-" + metric, "metric": metric, "unit": unit, "statistic": "sample", "quality": "measured",
                            "value": sample.value, "observedAt": timestamp(sample.date)]]
@@ -276,7 +344,7 @@ enum SparseDriveFixture {
         }, "series": series, "contexts": []]
     }
 
-    static func history(url: URL, now: Date) -> [String: Any] {
+    static func history(url: URL, now: Date, dense: Bool = false) -> [String: Any] {
         let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
         func value(_ name: String) -> String { query.first { $0.name == name }?.value ?? "" }
         let metric = value("metric")
@@ -284,9 +352,22 @@ enum SparseDriveFixture {
         let budget = max(1, Int(value("maxPoints")) ?? 120)
         let from = SignalFormat.date(value("from")) ?? now.addingTimeInterval(-30 * 86400)
         let to = SignalFormat.date(value("to")) ?? now
-        let selected = samples(metric: metric, now: now).filter { $0.date >= from && $0.date <= to }
+        let selected = (dense ? DenseDriveFixture.samples(metric: metric, now: now) : samples(metric: metric, now: now)).filter { $0.date >= from && $0.date <= to }
         var response: [String: Any] = ["metric": metric, "unit": unit, "from": timestamp(from), "to": timestamp(to), "maxPoints": budget, "series": []]
         guard !selected.isEmpty else { return response }
+        if value("binning") == "time" {
+            let width = max(0.001, to.timeIntervalSince(from) / Double(budget))
+            let groups = Dictionary(grouping: selected) { min(budget - 1, Int($0.date.timeIntervalSince(from) / width)) }
+            let points = groups.keys.sorted().map { key -> [String: Any] in
+                let readings = groups[key]!
+                var point = Self.point(readings, index: key)
+                point["bucketStart"] = timestamp(from.addingTimeInterval(Double(key) * width))
+                point["bucketEnd"] = timestamp(from.addingTimeInterval(Double(key + 1) * width))
+                return point
+            }
+            response["series"] = [["source": "pi", "quality": "measured", "statistic": "sample", "unit": unit, "points": points]]
+            return response
+        }
         let gaps = (1..<selected.count).filter { selected[$0].date.timeIntervalSince(selected[$0 - 1].date) > 900 }.sorted {
             let left = selected[$0].date.timeIntervalSince(selected[$0 - 1].date)
             let right = selected[$1].date.timeIntervalSince(selected[$1 - 1].date)
@@ -309,21 +390,39 @@ enum SparseDriveFixture {
             let groups = Dictionary(grouping: segment.indices) { $0 * allocations[index] / segment.count }
             for key in groups.keys.sorted() {
                 let readings = groups[key]!.map { segment[$0] }
-                let first = readings.first!, last = readings.last!
-                let minimum = readings.min { $0.value < $1.value }!, maximum = readings.max { $0.value < $1.value }!
-                let maxGap = zip(readings, readings.dropFirst()).map { $1.date.timeIntervalSince($0.date) }.max() ?? 0
-                points.append(["bucketIndex": points.count, "bucketStart": timestamp(first.date), "bucketEnd": timestamp(last.date),
-                    "windowStart": timestamp(first.date), "windowEnd": timestamp(last.date),
-                    "firstObservedAt": timestamp(first.date), "lastObservedAt": timestamp(last.date),
-                    "minimumObservedAt": timestamp(minimum.date), "maximumObservedAt": timestamp(maximum.date), "maxGapSeconds": maxGap,
-                    "minimum": minimum.value, "maximum": maximum.value, "first": first.value, "last": last.value,
-                    "mean": readings.map(\.value).reduce(0, +) / Double(readings.count), "count": readings.count])
+                points.append(point(readings, index: points.count))
             }
         }
         response["series"] = [["source": "pi", "quality": "measured", "statistic": "sample", "unit": unit, "points": points]]
         return response
     }
 
+    private static func point(_ readings: [Sample], index: Int) -> [String: Any] {
+        let first = readings.first!, last = readings.last!
+        let minimum = readings.min { $0.value < $1.value }!, maximum = readings.max { $0.value < $1.value }!
+        let maxGap = zip(readings, readings.dropFirst()).map { $1.date.timeIntervalSince($0.date) }.max() ?? 0
+        return ["bucketIndex": index, "bucketStart": timestamp(first.date), "bucketEnd": timestamp(last.date),
+            "windowStart": timestamp(first.date), "windowEnd": timestamp(last.date),
+            "firstObservedAt": timestamp(first.date), "lastObservedAt": timestamp(last.date),
+            "minimumObservedAt": timestamp(minimum.date), "maximumObservedAt": timestamp(maximum.date), "maxGapSeconds": maxGap,
+            "minimum": minimum.value, "maximum": maximum.value, "first": first.value, "last": last.value,
+            "mean": readings.map(\.value).reduce(0, +) / Double(readings.count), "count": readings.count]
+    }
+
     private static func timestamp(_ date: Date) -> String { ISO8601DateFormatter().string(from: date) }
+}
+
+enum DenseDriveFixture {
+    // Older sessions force a real month-wide domain; the recent drive is only 30 minutes of that domain.
+    static func samples(metric: String, now: Date) -> [SparseDriveFixture.Sample] {
+        [(-28 * 86400, 12), (-14 * 86400, 12), (-2100, 900)].flatMap { offset, count in
+            (0..<count).map { index in
+                let wave = sin(Double(index) * 0.13)
+                let timing = index % 97 == 45 ? 44.0 : index % 83 == 27 ? -4.0 : 18 + wave * 12
+                let speed = index % 80 < 10 ? 0.0 : 46 + wave * 30
+                return SparseDriveFixture.Sample(date: now.addingTimeInterval(Double(offset + index * 2)), value: metric == "speed_kph" ? speed : timing)
+            }
+        }
+    }
 }
 #endif

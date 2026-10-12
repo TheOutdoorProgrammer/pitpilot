@@ -194,9 +194,11 @@ final class PitPilotUITests: XCTestCase {
         XCTAssertTrue(fuel.waitForExistence(timeout: 5))
         XCTAssertFalse(app.buttons["signal-rpm"].exists)
         if !fuel.isHittable { app.swipeUp() }
-        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in fuel.label.contains("all sources") }, object: nil)], timeout: 5), .completed)
         capture("Signals overview with actual values", app)
         fuel.tap()
+        XCTAssertTrue(app.segmentedControls["signalPresentation"].waitForExistence(timeout: 5))
+        app.segmentedControls["signalPresentation"].buttons["Readings"].tap()
+        selectSignalRange("1 year", app)
         XCTAssertTrue(app.descendants(matching: .any)["signalHistoryChart"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["Squares show daily summaries · gaps in samples stay empty"].exists)
         XCTAssertFalse(app.descendants(matching: .any)["calendarSignalChart"].exists)
@@ -219,6 +221,8 @@ final class PitPilotUITests: XCTestCase {
         XCTAssertTrue(manifold.label.contains("Stale reading"))
         manifold.tap()
         XCTAssertTrue(app.descendants(matching: .any)["signalHistoryChart"].waitForExistence(timeout: 5))
+        app.segmentedControls["signalPresentation"].buttons["Readings"].tap()
+        waitForSignalHistory(app)
         capture("Manifold timestamped history", app)
         app.buttons["signalStatistic"].tap()
         app.buttons["Period maximum"].tap()
@@ -231,6 +235,9 @@ final class PitPilotUITests: XCTestCase {
         app.staticTexts["Synthetic route truck"].tap()
         for _ in 0..<4 where !app.buttons["signal-fuel_level_pct"].isHittable { app.swipeUp() }
         app.buttons["signal-fuel_level_pct"].tap()
+        XCTAssertTrue(app.segmentedControls["signalPresentation"].waitForExistence(timeout: 5))
+        app.segmentedControls["signalPresentation"].buttons["Readings"].tap()
+        selectSignalRange("1 year", app)
         XCTAssertTrue(app.staticTexts["Saved history on this phone"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.descendants(matching: .any)["signalHistoryChart"].exists)
         capture("Offline saved fuel history", app)
@@ -248,13 +255,13 @@ final class PitPilotUITests: XCTestCase {
         timing.tap()
         let chart = app.descendants(matching: .any)["signalHistoryChart"]
         XCTAssertTrue(chart.waitForExistence(timeout: 5))
-        let range = app.segmentedControls["signalRange"]
-        XCTAssertTrue(range.buttons["30 days"].isSelected)
+        selectSignalRange("30 days", app)
+        app.segmentedControls["signalPresentation"].buttons["Readings"].tap()
+        waitForSignalHistory(app)
         XCTAssertTrue(app.staticTexts["Recorded readings · gaps show missing coverage"].exists)
         XCTAssertFalse(app.staticTexts["Recorded trend · shaded range · dotted gaps"].exists)
         capture("Sparse timing overview with four distinct recording sessions", app)
-        range.buttons["24 hours"].tap()
-        XCTAssertTrue(range.buttons["24 hours"].isSelected)
+        selectSignalRange("24 hours", app)
         XCTAssertTrue(chart.waitForExistence(timeout: 5))
         XCTAssertTrue(app.descendants(matching: .any)["signalHistoryLoading"].waitForNonExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["Recorded readings · gaps show missing coverage"].exists)
@@ -271,8 +278,8 @@ final class PitPilotUITests: XCTestCase {
         reveal(speed, app)
         speed.tap()
         XCTAssertTrue(chart.waitForExistence(timeout: 5))
-        range.buttons["24 hours"].tap()
-        XCTAssertTrue(range.buttons["24 hours"].isSelected)
+        app.segmentedControls["signalPresentation"].buttons["Readings"].tap()
+        selectSignalRange("24 hours", app)
         XCTAssertTrue(chart.waitForExistence(timeout: 5))
         XCTAssertTrue(app.descendants(matching: .any)["signalHistoryLoading"].waitForNonExistence(timeout: 5))
         capture("Recent speed detail retains zero readings and recording gaps", app)
@@ -283,12 +290,71 @@ final class PitPilotUITests: XCTestCase {
         app.staticTexts["Synthetic route truck"].tap()
         reveal(app.buttons["signal-timing_advance_deg"], app)
         app.buttons["signal-timing_advance_deg"].tap()
-        XCTAssertTrue(app.staticTexts["Saved history on this phone"].waitForExistence(timeout: 5))
-        app.segmentedControls["signalRange"].buttons["24 hours"].tap()
+        XCTAssertTrue(app.segmentedControls["signalPresentation"].waitForExistence(timeout: 5))
+        app.segmentedControls["signalPresentation"].buttons["Readings"].tap()
+        selectSignalRange("24 hours", app)
         XCTAssertTrue(chart.waitForExistence(timeout: 5))
         XCTAssertTrue(app.descendants(matching: .any)["signalHistoryLoading"].waitForNonExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["Saved history on this phone"].exists)
         capture("Offline recent timing preserves exact peaks and real gaps", app)
+    }
+
+    func testDenseDriveMonthOverviewUsesAveragesAndRecentDetailRemainsReadableOffline() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-testing", "--ui-testing-signals", "--ui-testing-dense-drive"]
+        app.launch()
+        connect(app)
+        app.staticTexts["Synthetic route truck"].tap()
+        let timing = app.buttons["signal-timing_advance_deg"]
+        reveal(timing, app)
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in timing.label.contains("Latest session") }, object: nil)], timeout: 5), .completed)
+        capture("Dense drive dashboard bounded recent-session preview", app)
+        timing.tap()
+        waitForSignalHistory(app)
+        let presentation = app.segmentedControls["signalPresentation"]
+        XCTAssertTrue(presentation.buttons["Averaged"].isSelected)
+        selectSignalRange("30 days", app)
+        XCTAssertTrue(presentation.buttons["Averaged"].isSelected)
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "averages")).firstMatch.exists)
+        XCTAssertFalse(app.staticTexts["Recorded readings · gaps show missing coverage"].exists)
+        capture("Dense thirty-minute drive averaged across a true thirty-day overview", app)
+
+        presentation.buttons["Readings"].tap()
+        waitForSignalHistory(app)
+        XCTAssertTrue(app.staticTexts["Recorded readings · gaps show missing coverage"].exists)
+        capture("Dense drive month overview raw readings opt-in", app)
+        selectSignalRange("Recent", app)
+        XCTAssertTrue(app.staticTexts["signalRecentScope"].exists)
+        capture("Recent dense drive raw detail preserves real zero and peak readings", app)
+        presentation.buttons["Averaged"].tap()
+        waitForSignalHistory(app)
+        capture("Recent dense drive observation averages", app)
+
+        XCUIDevice.shared.orientation = .landscapeLeft
+        defer { XCUIDevice.shared.orientation = .portrait }
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in app.frame.width > app.frame.height }, object: nil)], timeout: 5), .completed)
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.85)).press(forDuration: 0.05,
+            thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.2)))
+        capture("Recent dense drive averages landscape with readable time axis", app)
+        XCUIDevice.shared.orientation = .portrait
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in app.frame.width < app.frame.height }, object: nil)], timeout: 5), .completed)
+
+        app.terminate()
+        app.launchArguments += ["--ui-testing-preserve-cache", "--ui-testing-offline"]
+        app.launch()
+        XCTAssertTrue(app.staticTexts["Saved on this phone"].waitForExistence(timeout: 5))
+        app.staticTexts["Synthetic route truck"].tap()
+        reveal(timing, app)
+        timing.tap()
+        selectSignalRange("30 days", app)
+        XCTAssertTrue(app.staticTexts["Saved history on this phone"].waitForExistence(timeout: 5))
+        XCTAssertTrue(presentation.buttons["Averaged"].isSelected)
+        capture("Offline month overview preserves separately cached averages", app)
+        selectSignalRange("Recent", app)
+        presentation.buttons["Readings"].tap()
+        waitForSignalHistory(app)
+        XCTAssertTrue(app.staticTexts["Saved history on this phone"].exists)
+        capture("Offline recent detail preserves separately cached raw readings", app)
     }
 
     func testImperialDisplayUnitsPersistAndConvertCachedHistoryOffline() {
@@ -672,6 +738,19 @@ final class PitPilotUITests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Recorded trip route")).firstMatch.exists)
         XCTAssertTrue(app.staticTexts["Estimated from GPS fixes. Separate from the odometer."].exists)
         capture("Pi trip route remains separate from Smartcar vehicle", app)
+    }
+
+    private func selectSignalRange(_ label: String, _ app: XCUIApplication) {
+        let menu = app.buttons["signalRange"]
+        XCTAssertTrue(menu.waitForExistence(timeout: 5))
+        menu.tap()
+        app.buttons[label].tap()
+        waitForSignalHistory(app)
+    }
+
+    private func waitForSignalHistory(_ app: XCUIApplication) {
+        XCTAssertTrue(app.descendants(matching: .any)["signalHistoryChart"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.descendants(matching: .any)["signalHistoryLoading"].waitForNonExistence(timeout: 5))
     }
 
     private func reveal(_ element: XCUIElement, _ app: XCUIApplication) {
