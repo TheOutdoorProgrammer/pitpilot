@@ -89,6 +89,9 @@ Deployed acceptance passed odometer calibration and replay checks, authenticated
 ### Native vehicle measurements
 
 - [x] Show or hide individual dashboard metrics per vehicle on this phone, without changing collection or stored history.
+- [x] Batch visible dashboard metrics into previews of at most 10 points each, using bounded queries and a separate offline cache.
+- [x] Open numeric charts on recent recorded coverage and offer averages by time interval alongside preserved readings, with real recording gaps retained.
+- [x] Validate a dense short drive in an overview spanning a month, including recent detail, landscape layout and separate offline caches for averages and readings.
 - [x] Combine compatible imported and native readings in one chart while retaining source, quality, statistic and time precision.
 - [x] Keep long timestamped recording gaps empty; retain dotted guides only for calendar summaries.
 - [x] Preserve original sample peak times and offer a 24-hour detail range within the shared history chart.
@@ -102,6 +105,10 @@ Deployed acceptance passed odometer calibration and replay checks, authenticated
 - [x] Choose charts by measurement type: filled numeric trends, boolean and code lanes, and count or total bars with readable date axes.
 - [x] Provide an opt-in OpenMetrics endpoint with a separate read-only credential.
 - [x] Convert complete generated driving and status notes transactionally, preserving structured diagnostics and original evidence before removing visible notes.
+
+[v0.5.10](https://github.com/TheOutdoorProgrammer/pitpilot/releases/tag/v0.5.10) adds bounded dashboard previews and numeric charts that open on recent coverage with time-bucket averages. Readings mode retains peaks, and neither presentation rewrites stored observations. The [release workflow](https://github.com/TheOutdoorProgrammer/pitpilot/actions/runs/38189323271) passed all 102 native tests without failures or skips on the self-hosted runner, plus Go race, vet and vulnerability checks. Reviewed screenshots cover a dense short drive within a month, recent detail, raw peaks, landscape and separate offline caches. The signed [Fledge app is 0.5.10, build 39](https://fledge.theoutdoorprogrammer.com/a/com.theoutdoorprogrammer.pitpilot/80dbaddc001e); its downloaded bytes match the verified IPA. Both runtime architectures match the GoReleaser artifacts built through Quill before container assembly.
+
+Live checks across 41 metrics reduced dashboard chart requests from 41 to two and JSON payload from 1,956,515 to 174,722 bytes, a 91% reduction. Every preview stayed within the 10-point limit. All 41 fixed-time histories matched the live adaptive histories for sample counts, extrema and weighted totals. Independent backup comparison preserved all 30,784 original observations byte-for-byte and identified six valid Smartcar additions received before rollout. These measurements cover chart API traffic, not overall physical-phone rendering speed.
 
 Native measurements were introduced in [v0.3.0](https://github.com/TheOutdoorProgrammer/pitpilot/releases/tag/v0.3.0). Chart improvements shipped in [v0.3.1](https://github.com/TheOutdoorProgrammer/pitpilot/releases/tag/v0.3.1). Its [release workflow](https://github.com/TheOutdoorProgrammer/pitpilot/actions/runs/37849807248) passed backend checks, 29 native unit tests, seven UI journeys, and 16 runner cleanup fixtures. Native builds and signing ran on the self-hosted runner.
 
@@ -150,19 +157,20 @@ Deployed acceptance verified ingestion, retry and conflict behavior, preserved h
 The [collector tests](internal/picollector) cover durable dual delivery, rejected empty observations, clock gating, revocation, signed artifact validation, interrupted activation, and rollback after multiple upgrades. The initial profile is read-only J1850 VPW over an already configured serial/RFCOMM adapter. The first physical installation and exclusive handoff from the old collector have passed. Physical power-loss recovery and guided Bluetooth/network setup remain acceptance work. See [collector setup](docs/picollector.md).
 
 - [x] Implement signed V4 webhook ingestion, durable event receipts, native measurements and last-known locations with hourly polling fallback.
-- [ ] Verify the operator's webhook callback and receive an authentic vehicle update after configuring the Application Management Token and subscribing the vehicle.
+- [x] Verify the operator's webhook callback and receive an authentic vehicle update after configuring the Application Management Token and subscribing the vehicle.
 
 [Smartcar tests](internal/smartcar) cover authorization ownership, reconnect preservation, missing timestamps, unsupported signals, provider failures, bounded reconciliation, webhook signatures, replay, and concurrent delivery. Live connection requires the operator's application UUID, mounted credentials, and valid OEM consent. Webhook activation additionally requires the separate management token and a verified provider webhook subscription. Neither delivery mechanism reconstructs driven routes from parked positions. See [Smartcar setup](docs/smartcar.md).
 
 [v0.4.0](https://github.com/TheOutdoorProgrammer/pitpilot/releases/tag/v0.4.0) ships these integration foundations and [signed iOS build 13](https://fledge.theoutdoorprogrammer.com/a/com.theoutdoorprogrammer.pitpilot/9b1d5bf4c5c0). The self-hosted runner passed 39 unit tests and 10 UI journeys. Go race tests, vet and vulnerability checks passed before Quill built the GoReleaser artifacts and container. Both collector manifests and container platforms were verified. Deployed acceptance passed 27 integration checks, 18 measurement/authentication checks and 127 existing-data comparisons. All eight existing data tables were preserved, and Grafana verified correlated backend and synthetic native telemetry.
 
-Physical collector installation and live Smartcar authorization have been exercised. The old collector is disabled, while the existing receiver remains necessary for Home Assistant delivery. The old Kubernetes Smartcar sync was retired after its credentials were reused and its vehicle mapping and state were backed up. Real power-loss acceptance and successful fresh OEM signal retrieval remain open; authorization alone does not prove provider recovery.
+Physical collector installation, live Smartcar authorization and authentic signed webhook delivery have been exercised. Webhook acceptance stored fuel level, odometer, oil life and last-known location; this does not establish availability of every selected provider signal. The old collector is disabled, while the existing receiver remains necessary for Home Assistant delivery. The old Kubernetes Smartcar sync was retired after its credentials were reused and its vehicle mapping and state were backed up. Broader power-loss recovery and provider capability acceptance remain open.
 
 [v0.4.2](https://github.com/TheOutdoorProgrammer/pitpilot/releases/tag/v0.4.2) adds backend odometer calibration and hourly Smartcar reconciliation. Its [release](https://github.com/TheOutdoorProgrammer/pitpilot/actions/runs/37877157972) passed 41 native unit tests and 10 UI journeys on the self-hosted runner. Live checks verified corrected readings, distance accumulation, duplicate protection, reordered uploads, edits and deletion. All original database rows survived the schema upgrade. Manual Smartcar sync preserves the hourly deadline; the current provider connection still requires recovery, which remains visible in the app.
 
 ### Trip history and maps
 
-- [ ] Validate a GPS source for the Pi workflow; evaluate phone recording separately, including background behavior and battery use.
+- [x] Validate a physical USB GPS source for the Pi workflow, including recorded outbound and return drives and the home geofence transition.
+- [ ] Evaluate phone recording separately, including background behavior and battery use.
 - [x] Detect trips and stops from available evidence, tolerating delayed uploads, missing observations, and clock changes.
 - [ ] Show trip distance, duration, stops, source, and recording coverage; allow correction, splitting, merging, and deletion.
 - [ ] Display recorded routes and replay a drive on the native map, with explicit gaps and accuracy information.
