@@ -174,14 +174,24 @@ struct SignalHistoryView: View {
     private var preview: SignalPreviewEnvelope? { store.signalPreview(vehicleID: vehicleID, metric: metric) }
     private var numeric: Bool { SignalChartKind.resolve(unit: latest.definition(metric)?.unit ?? "", statistic: statistic) == .trend }
     private var selectedPresentation: SignalChartPresentation { numeric ? presentation : .readings }
+    private var previewBounds: (from: Date, to: Date)? {
+        guard let preview, ["latest_session", "recent_trend"].contains(preview.scope),
+              preview.history.series.contains(where: { !$0.points.isEmpty }),
+              let from = SignalFormat.date(preview.history.from), let to = SignalFormat.date(preview.history.to), to >= from else { return nil }
+        return (from, max(to, from.addingTimeInterval(0.001)))
+    }
     private var recentBounds: (from: Date, to: Date)? {
-        if let preview, preview.scope == "latest_session",
-           let from = SignalFormat.date(preview.history.from), let to = SignalFormat.date(preview.history.to), to >= from {
-            return (from, max(to, from.addingTimeInterval(1)))
-        }
+        if let bounds = previewBounds { return bounds }
         guard let newest = latest.readings(metric).compactMap({ $0.latest.referenceDate }).max() else { return nil }
         let to = newest.addingTimeInterval(1)
         return (to.addingTimeInterval(-86400), to)
+    }
+    private var recentScopeLabel: String {
+        if previewBounds != nil, let preview {
+            let scope = preview.scope == "latest_session" ? "Latest recorded session" : "Recent recorded trend"
+            return scope + (preview.truncated ? " · latest portion" : "")
+        }
+        return recentBounds == nil ? "Available historical readings" : "24 hours ending at the latest reading"
     }
     private var selectionKey: String { "\(days)/\(selectedPresentation.rawValue)/\(preview?.history.from ?? "")/\(preview?.history.to ?? "")/\(store.signals(vehicleID)?.historyRevision ?? "")" }
 
@@ -214,7 +224,7 @@ struct SignalHistoryView: View {
                     Text("1 year").tag(365)
                 }.pickerStyle(.menu).accessibilityIdentifier("signalRange")
                 if days == 0 {
-                    Text(preview?.scope == "latest_session" ? "Latest recorded session\(preview?.truncated == true ? " · latest portion" : "")" : recentBounds == nil ? "Available historical readings" : "24 hours ending at the latest reading")
+                    Text(recentScopeLabel)
                         .font(.caption).foregroundStyle(.secondary).accessibilityIdentifier("signalRecentScope")
                 }
                 if saved { Label("Saved history on this phone", systemImage: "wifi.slash").foregroundStyle(.orange).font(.callout) }
