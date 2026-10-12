@@ -840,6 +840,28 @@ final class PitPilotTests: XCTestCase {
         XCTAssertEqual(chart.buckets.first?.point.maximum, 60)
     }
 
+    func testMonthOverviewAveragesDenseDriveWithoutExpandingItsExtrema() throws {
+        let now = try XCTUnwrap(SignalFormat.date("2026-02-20T12:00:00Z"))
+        var url = URLComponents(string: "https://pitpilot.test/api/v1/vehicles/synthetic/signals/history")!
+        url.queryItems = [URLQueryItem(name: "metric", value: "timing_advance_deg"),
+            URLQueryItem(name: "from", value: "2026-01-21T12:00:00Z"), URLQueryItem(name: "to", value: "2026-02-20T12:00:00Z"),
+            URLQueryItem(name: "maxPoints", value: "48"), URLQueryItem(name: "binning", value: "time")]
+        let payload = SparseDriveFixture.history(url: url.url!, now: now, dense: true)
+        let history = try JSONDecoder().decode(SignalHistory.self, from: JSONSerialization.data(withJSONObject: payload))
+        let points = try XCTUnwrap(history.series.first?.points)
+        XCTAssertEqual(points.count, 3)
+        XCTAssertEqual(points.reduce(0) { $0 + $1.count }, 924)
+        XCTAssertEqual(points.map(\.count).max(), 900)
+        let averaged = SignalChartData(history: history, statistic: "trend", presentation: .averaged)
+        XCTAssertEqual(averaged.vertices.count, 3)
+        XCTAssertEqual(Set(averaged.vertices.map(\.x)).count, 3)
+        XCTAssertEqual(averaged.vertices.map(\.value), points.map(\.mean))
+        XCTAssertTrue(averaged.sparseVertices.isEmpty)
+        let readings = SignalChartData(history: history, statistic: "trend", presentation: .readings)
+        XCTAssertGreaterThan(readings.vertices.count, averaged.vertices.count)
+        XCTAssertEqual(readings.vertices.map(\.value).max(), DenseDriveFixture.samples(metric: "timing_advance_deg", now: now).map(\.value).max())
+    }
+
     func testSparseDriveFixturePreservesSamplesPeaksAndActualGapsAcrossRequestedRanges() throws {
         let now = try XCTUnwrap(SignalFormat.date("2026-02-20T12:00:00Z"))
         for days in [1, 30] {
