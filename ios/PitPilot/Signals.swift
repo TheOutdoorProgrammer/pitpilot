@@ -239,6 +239,13 @@ struct SignalStateMark: Identifiable {
     let summary: Bool
 }
 
+enum SignalChartPresentation: String, CaseIterable {
+    case averaged, readings
+    var label: String { self == .averaged ? "Averaged" : "Readings" }
+    var binning: String { self == .averaged ? "time" : "adaptive" }
+    var maxPoints: Int { self == .averaged ? 48 : 120 }
+}
+
 struct SignalChartData {
     let buckets: [SignalChartBucket]
     let vertices: [SignalChartVertex]
@@ -248,8 +255,10 @@ struct SignalChartData {
     let valueLabels: [String: String]?
     var sparseVertices: [SignalChartVertex] = []
     var hasCalendarDays = false
+    var presentation: SignalChartPresentation = .readings
 
-    init(history: SignalHistory, statistic: String, valueLabels: [String: String]? = nil) {
+    init(history: SignalHistory, statistic: String, valueLabels: [String: String]? = nil, presentation: SignalChartPresentation = .readings) {
+        self.presentation = presentation
         self.valueLabels = valueLabels
         self.statistic = statistic
         calendar = false
@@ -261,7 +270,7 @@ struct SignalChartData {
         var extents: [(first: SignalChartVertex, last: SignalChartVertex)] = []
         for series in history.displayedSeries(statistic) {
             for calendar in [false, true] {
-                let layer = SignalChartData(series: series, unit: history.displayedUnit(statistic), calendar: calendar, valueLabels: valueLabels)
+                let layer = SignalChartData(series: series, unit: history.displayedUnit(statistic), calendar: calendar, valueLabels: valueLabels, presentation: presentation)
                 // Noon is only a drawing position within an unknown-time day, never an observation timestamp.
                 func position(_ x: Double) -> Double { calendar ? x * 86400 + 43200 : x }
                 allBuckets += layer.buckets.map { SignalChartBucket(point: $0.point, start: position($0.start), end: position($0.end), calendar: calendar, origin: series) }
@@ -299,7 +308,8 @@ struct SignalChartData {
         hasCalendarDays = hasDays
     }
 
-    init(series: SignalHistorySeries, unit: String, calendar: Bool, maximumJoinGapSeconds: Int = 900, valueLabels: [String: String]? = nil) {
+    init(series: SignalHistorySeries, unit: String, calendar: Bool, maximumJoinGapSeconds: Int = 900, valueLabels: [String: String]? = nil, presentation: SignalChartPresentation = .readings) {
+        self.presentation = presentation
         self.valueLabels = valueLabels
         self.calendar = calendar
         statistic = series.statistic
@@ -321,7 +331,7 @@ struct SignalChartData {
         for bucket in buckets {
             guard kind == .trend else { continue }
             var values: [(Double, Double)] = []
-            if calendar || series.statistic != "sample" {
+            if presentation == .averaged || calendar || series.statistic != "sample" {
                 values = [(bucket.center, bucket.point.mean)]
             } else {
                 for (timestamp, value) in [
@@ -340,13 +350,20 @@ struct SignalChartData {
             let missingBucket: Bool
             if let previous {
                 if calendar { missingBucket = bucket.start - previous.end > 1 }
-                else { missingBucket = series.statistic != "sample" && bucket.start > previous.end }
+                else if presentation == .averaged {
+                    // Adjacent averages may connect only where their observed coverage also meets.
+                    let previousEnd = previous.point.lastObservedAt.flatMap(SignalFormat.date)?.timeIntervalSince1970 ?? previous.end
+                    let nextStart = bucket.point.firstObservedAt.flatMap(SignalFormat.date)?.timeIntervalSince1970 ?? bucket.start
+                    let previousGap = previous.point.maxGapSeconds ?? previous.end - previous.start
+                    let nextGap = bucket.point.maxGapSeconds ?? bucket.end - bucket.start
+                    missingBucket = nextStart - previousEnd > Double(maximumJoinGapSeconds) || max(previousGap, nextGap) > Double(maximumJoinGapSeconds)
+                } else { missingBucket = series.statistic != "sample" && bucket.start > previous.end }
             } else { missingBucket = false }
             if missingBucket { segment += 1 }
             // Old cached buckets lack gap metadata; their full span is the only safe bound.
             let internalGap = bucket.point.maxGapSeconds ?? (bucket.end - bucket.start)
             for (index, value) in values.enumerated() {
-                if !calendar, series.statistic == "sample", let lastX,
+                if presentation == .readings, !calendar, series.statistic == "sample", let lastX,
                    (index == 0 && value.0 - lastX > Double(maximumJoinGapSeconds)) || (index > 0 && internalGap > Double(maximumJoinGapSeconds)) {
                     segment += 1
                 }
@@ -402,12 +419,25 @@ struct SignalChartData {
         return (bucket.center - halfWidth)...(bucket.center + halfWidth)
     }
     func yDomain(unit: String) -> ClosedRange<Double> {
-        let minimum = buckets.map { $0.point.minimum }.min() ?? 0
-        let maximum = buckets.map { $0.point.maximum }.max() ?? 1
+        let minimum = buckets.map { presentation == .averaged && kind == .trend ? $0.point.mean : $0.point.minimum }.min() ?? 0
+        let maximum = buckets.map { presentation == .averaged && kind == .trend ? $0.point.mean : $0.point.maximum }.max() ?? 1
         if unit == "%", minimum >= 0, maximum <= 100 { return 0...100 }
         let padding = max((maximum - minimum) * 0.12, max(abs(maximum) * 0.05, 1))
         if kind == .bars { return (minimum >= 0 ? 0 : minimum - padding)...max(1, maximum + padding) }
         return (minimum - padding)...(maximum + padding)
+    }
+    var averagingIntervalLabel: String {
+        let widths = buckets.compactMap { bucket -> Double? in
+            guard !bucket.calendar,
+                  let start = bucket.point.bucketStart.flatMap(SignalFormat.date),
+                  let end = bucket.point.bucketEnd.flatMap(SignalFormat.date), end > start else { return nil }
+            return end.timeIntervalSince(start)
+        }
+        guard let seconds = widths.max() else { return "period" }
+        if seconds >= 86400, seconds.truncatingRemainder(dividingBy: 86400) == 0 { return "\(Int(seconds / 86400))-day" }
+        if seconds >= 3600, seconds.truncatingRemainder(dividingBy: 3600) == 0 { return "\(Int(seconds / 3600))-hour" }
+        if seconds >= 60 { return "\((seconds / 60).formatted(.number.precision(.fractionLength(0...1))))-minute" }
+        return "\(max(1, Int(seconds.rounded())))-second"
     }
     var axisValues: [Double] {
         let low = buckets.first?.start ?? 0

@@ -1,65 +1,30 @@
 import SwiftUI
 import Charts
 
-actor SignalPreviewGate {
-    static let shared = SignalPreviewGate()
-    private var active = 0
-    private var waiting: [CheckedContinuation<Void, Never>] = []
-    func acquire() async {
-        if active < 3 { active += 1; return }
-        await withCheckedContinuation { waiting.append($0) }
-    }
-    func release() {
-        if waiting.isEmpty { active -= 1 } else { waiting.removeFirst().resume() }
-    }
-}
-
 struct SignalPreview: View {
     @EnvironmentObject private var store: GarageStore
     @AppStorage(DisplayUnits.preferenceKey) private var displayUnits: DisplayUnits = .metric
     let vehicleID: String
     let metric: String
     let latest: LatestSignals
-    @State private var history: SignalHistory?
-    @State private var loading = false
-    @State private var failed = false
-    @State private var requestID = UUID()
-    private var reading: LatestSignal? { latest.readings(metric).first }
-    private var days: Int { latest.initialHistoryDays(metric, statistic: "all") }
-    private var requestKey: String { "\(vehicleID)/\(reading?.id ?? metric)/\(reading?.latest.key ?? "")/\(days)/\(latest.asOf)/\(latest.historyRevision ?? "")" }
-    private var statistic: String { SignalHistory.trendStatistics.contains(reading?.statistic ?? "sample") ? "trend" : reading?.statistic ?? "trend" }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            if let history {
-                let displayed = history.displayed(in: displayUnits)
-                let data = SignalChartData(history: displayed, statistic: statistic, valueLabels: latest.definition(metric)?.valueLabels)
+            if let preview = store.signalPreview(vehicleID: vehicleID, metric: metric) {
+                let displayed = preview.history.displayed(in: displayUnits)
+                let statistic = displayed.series.first?.statistic ?? "sample"
+                let data = SignalChartData(history: displayed, statistic: statistic, valueLabels: latest.definition(metric)?.valueLabels, presentation: .averaged)
                 if !data.buckets.isEmpty {
-                    SignalMiniChart(data: data, unit: displayed.displayedUnit(statistic), estimated: reading?.quality == "estimated")
+                    SignalMiniChart(data: data, unit: displayed.displayedUnit(statistic), estimated: displayed.series.first?.quality == "estimated", useLastValue: preview.aggregation == "last")
                         .accessibilityLabel("\(latest.label(metric)) history preview")
                         .accessibilityIdentifier("preview-\(metric)")
-                    Text("\(days == 365 ? "1 year" : "\(days) days") · all sources")
+                    Text("\(preview.scope == "latest_session" ? "Latest session" : "Recent trend")\(preview.truncated ? " · latest portion" : "") · \(preview.aggregation == "sample_mean" ? "averages" : "states / values")\(store.offline || store.previewErrors[vehicleID] != nil ? " · saved" : "")")
                         .font(.caption2).foregroundStyle(.secondary)
+                    if let source = displayed.series.first?.source {
+                        Text(SignalFormat.source(source)).font(.caption2).foregroundStyle(.secondary)
+                    }
                 } else { placeholder("No history in this range") }
-            } else { placeholder(loading ? "Loading trend…" : failed ? "History unavailable" : "No history yet") }
-        }
-        .task(id: requestKey) {
-            guard reading != nil else { return }
-            let currentRequest = UUID()
-            requestID = currentRequest
-            history = store.cachedSignalHistory(vehicleID: vehicleID, metric: metric, statistic: "all", days: days)
-            guard !store.offline else { return }
-            loading = true; failed = false
-            await SignalPreviewGate.shared.acquire()
-            do {
-                try Task.checkCancellation()
-                let loaded = try await store.signalHistory(vehicleID: vehicleID, metric: metric, statistic: "all", days: days)
-                try Task.checkCancellation()
-                if requestID == currentRequest { history = loaded }
-            } catch is CancellationError { }
-            catch { if requestID == currentRequest { failed = true } }
-            await SignalPreviewGate.shared.release()
-            if requestID == currentRequest { loading = false }
+            } else { placeholder(store.previewsRefreshing.contains(vehicleID) ? "Loading trend…" : store.previewErrors[vehicleID] != nil ? "History unavailable" : "No history yet") }
         }
     }
 
@@ -73,15 +38,18 @@ struct SignalMiniChart: View {
     let data: SignalChartData
     let unit: String
     let estimated: Bool
+    var useLastValue = false
     private var tint: Color { estimated ? .cyan : PitStyle.amber }
 
     var body: some View {
         let isolated = data.isolatedVertexIDs
         Group {
             if data.kind == .state || data.kind == .category {
-                Chart(data.stateMarks) { mark in
-                    PointMark(x: .value("Time", mark.start), y: .value("State", mark.label))
-                        .foregroundStyle(mark.label == "Mixed" || mark.label == "Unknown" ? .gray : tint)
+                Chart(data.buckets) { bucket in
+                    let rawLabel = data.kind == .state ? bucket.state : bucket.category
+                    let label = rawLabel == "Mixed" || rawLabel == "Unknown" ? rawLabel : SignalFormat.value(bucket.point.last, unit: unit, labels: data.valueLabels)
+                    PointMark(x: .value("Time", bucket.center), y: .value("State", label))
+                        .foregroundStyle(label == "Mixed" || label == "Unknown" ? .gray : tint)
                         .symbolSize(18)
                 }
                 .chartYAxis { AxisMarks(position: .leading) { AxisValueLabel() } }
@@ -105,7 +73,7 @@ struct SignalMiniChart: View {
                     if data.kind == .bars {
                         ForEach(data.buckets) { bucket in
                             let bounds = data.barBounds(bucket)
-                            RectangleMark(xStart: .value("Start", bounds.lowerBound), xEnd: .value("End", bounds.upperBound), yStart: .value("Baseline", 0.0), yEnd: .value("Value", bucket.point.mean))
+                            RectangleMark(xStart: .value("Start", bounds.lowerBound), xEnd: .value("End", bounds.upperBound), yStart: .value("Baseline", 0.0), yEnd: .value("Value", useLastValue ? bucket.point.last : bucket.point.mean))
                                 .foregroundStyle(tint.gradient)
                         }
                     }

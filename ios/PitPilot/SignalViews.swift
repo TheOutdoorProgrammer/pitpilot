@@ -7,6 +7,8 @@ struct VehicleSignalsView: View {
     let vehicleID: String
     @State private var customizing = false
     private var latest: LatestSignals? { store.signals(vehicleID) }
+    private var previewMetrics: [String] { latest?.dashboardMetrics.filter { store.dashboardMetricVisible($0, vehicleID: vehicleID) } ?? [] }
+    private var previewKey: String { "\(latest?.asOf ?? "")/\(latest?.historyRevision ?? "")/\(previewMetrics.joined(separator: ","))" }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
@@ -57,6 +59,7 @@ struct VehicleSignalsView: View {
             }
         }
         .task { await store.refreshSignals(vehicleID) }
+        .task(id: previewKey) { await store.refreshSignalPreviews(vehicleID: vehicleID, metrics: previewMetrics) }
         .sheet(isPresented: $customizing) {
             if let latest { DashboardMetricsView(vehicleID: vehicleID, latest: latest) }
         }
@@ -154,6 +157,7 @@ struct SignalHistoryView: View {
     @State private var error: String?
     @State private var saved = false
     @State private var requestID: UUID?
+    @State private var presentation: SignalChartPresentation = .averaged
 
     init(vehicleID: String, metric: String, latest: LatestSignals) {
         self.vehicleID = vehicleID
@@ -162,12 +166,24 @@ struct SignalHistoryView: View {
         let available = latest.readings(metric).map(\.statistic)
         let initialStatistic = available.contains(where: { SignalHistory.trendStatistics.contains($0) }) ? "trend" : available.first ?? "trend"
         _statistic = State(initialValue: initialStatistic)
-        _days = State(initialValue: latest.initialHistoryDays(metric, statistic: "all"))
+        _days = State(initialValue: 0)
     }
     private var statistics: [String] {
         Array(Set(latest.readings(metric).map { SignalHistory.trendStatistics.contains($0.statistic) ? "trend" : $0.statistic })).sorted { ($0 == "trend" && $1 != "trend") || ($0 != "trend" && $1 != "trend" && SignalFormat.rank($0) < SignalFormat.rank($1)) }
     }
-    private var selectionKey: String { "\(days)/\(store.signals(vehicleID)?.historyRevision ?? "")" }
+    private var preview: SignalPreviewEnvelope? { store.signalPreview(vehicleID: vehicleID, metric: metric) }
+    private var numeric: Bool { SignalChartKind.resolve(unit: latest.definition(metric)?.unit ?? "", statistic: statistic) == .trend }
+    private var selectedPresentation: SignalChartPresentation { numeric ? presentation : .readings }
+    private var recentBounds: (from: Date, to: Date)? {
+        if let preview, preview.scope == "latest_session",
+           let from = SignalFormat.date(preview.history.from), let to = SignalFormat.date(preview.history.to), to >= from {
+            return (from, max(to, from.addingTimeInterval(1)))
+        }
+        guard let newest = latest.readings(metric).compactMap({ $0.latest.referenceDate }).max() else { return nil }
+        let to = newest.addingTimeInterval(1)
+        return (to.addingTimeInterval(-86400), to)
+    }
+    private var selectionKey: String { "\(days)/\(selectedPresentation.rawValue)/\(preview?.history.from ?? "")/\(preview?.history.to ?? "")/\(store.signals(vehicleID)?.historyRevision ?? "")" }
 
     var body: some View {
         ScrollView {
@@ -185,12 +201,22 @@ struct SignalHistoryView: View {
                         ForEach(statistics, id: \.self) { Text($0 == "trend" ? "Trend" : SignalFormat.statistic($0)).tag($0) }
                     }.pickerStyle(.menu).accessibilityIdentifier("signalStatistic")
                 }
+                if numeric {
+                    Picker("Chart presentation", selection: $presentation) {
+                        ForEach(SignalChartPresentation.allCases, id: \.self) { Text($0.label).tag($0) }
+                    }.pickerStyle(.segmented).accessibilityIdentifier("signalPresentation")
+                }
                 Picker("History range", selection: $days) {
+                    Text("Recent").tag(0)
                     Text("24 hours").tag(1)
                     Text("7 days").tag(7)
                     Text("30 days").tag(30)
                     Text("1 year").tag(365)
-                }.pickerStyle(.segmented).accessibilityIdentifier("signalRange")
+                }.pickerStyle(.menu).accessibilityIdentifier("signalRange")
+                if days == 0 {
+                    Text(preview?.scope == "latest_session" ? "Latest recorded session\(preview?.truncated == true ? " · latest portion" : "")" : recentBounds == nil ? "Available historical readings" : "24 hours ending at the latest reading")
+                        .font(.caption).foregroundStyle(.secondary).accessibilityIdentifier("signalRecentScope")
+                }
                 if saved { Label("Saved history on this phone", systemImage: "wifi.slash").foregroundStyle(.orange).font(.callout) }
                 if let error {
                     Text(error).foregroundStyle(.orange).font(.callout)
@@ -198,9 +224,9 @@ struct SignalHistoryView: View {
                 }
                 if loading { ProgressView("Loading history…").frame(maxWidth: .infinity).accessibilityIdentifier("signalHistoryLoading") }
                 if let history = history?.displayed(in: displayUnits), !history.displayedSeries(statistic).allSatisfy({ $0.points.isEmpty }) {
-                    let data = SignalChartData(history: history, statistic: statistic, valueLabels: latest.definition(metric)?.valueLabels)
+                    let data = SignalChartData(history: history, statistic: statistic, valueLabels: latest.definition(metric)?.valueLabels, presentation: selectedPresentation)
                     SignalSeriesChart(data: data, unit: history.displayedUnit(statistic))
-                        .id("\(days)/\(statistic)/\(displayUnits.rawValue)")
+                        .id("\(days)/\(statistic)/\(presentation.rawValue)/\(displayUnits.rawValue)")
                     DisclosureGroup("About these readings") {
                         VStack(alignment: .leading, spacing: 10) {
                             Text("Requested range: \(SignalFormat.interval(history.from, history.to))")
@@ -210,6 +236,8 @@ struct SignalHistoryView: View {
                             }
                             if history.unit == "boolean" || history.unit == "code" {
                                 Text("Lanes show observed states. Mixed means different states were recorded within a bucket; transition times and state durations are unavailable. Sample bands stop at 15 minutes; longer windows show recorded endpoints. No average is treated as a state.")
+                            } else if selectedPresentation == .averaged {
+                                Text("Each point averages recorded values in a time bucket. Sample buckets average observed samples; summary buckets average reported summaries, not driving duration. Empty periods are omitted. Stored readings are unchanged. Switch to Readings for preserved peaks; tap a point for its minimum, maximum and count.")
                             } else if statistic == "trend" {
                                 Text("Lines follow recorded samples and preserved peaks at their actual times. Shading stays under those lines. Collection gaps longer than 15 minutes remain empty; reduced periods with unknown coverage are not connected. Minimum, maximum and average values remain available below. Choose 24 hours for recent detail.")
                             } else {
@@ -252,13 +280,16 @@ struct SignalHistoryView: View {
         requestID = id
         let requestedStatistic = "all"
         let requestedDays = days
-        history = store.cachedSignalHistory(vehicleID: vehicleID, metric: metric, statistic: requestedStatistic, days: requestedDays)
+        let mode = selectedPresentation
+        let bounds = days == 0 ? recentBounds : nil
+        let effectiveDays = days == 0 && bounds == nil ? latest.initialHistoryDays(metric, statistic: "all") : requestedDays
+        history = store.cachedSignalHistory(vehicleID: vehicleID, metric: metric, statistic: requestedStatistic, days: effectiveDays, binning: mode.binning, maxPoints: mode.maxPoints, from: bounds?.from, to: bounds?.to)
         saved = history != nil
         error = nil
         loading = true
         defer { if requestID == id { loading = false } }
         do {
-            let result = try await store.signalHistory(vehicleID: vehicleID, metric: metric, statistic: requestedStatistic, days: requestedDays)
+            let result = try await store.signalHistory(vehicleID: vehicleID, metric: metric, statistic: requestedStatistic, days: effectiveDays, binning: mode.binning, maxPoints: mode.maxPoints, from: bounds?.from, to: bounds?.to)
             guard requestID == id else { return }
             history = result
             saved = false
@@ -289,6 +320,7 @@ private struct SignalSeriesChart: View {
         if data.kind == .bars {
             return data.buckets.contains { $0.point.count > 1 } ? "Average per bucket · whiskers show range" : SignalFormat.statistic(data.statistic)
         }
+        if data.presentation == .averaged { return "\(data.averagingIntervalLabel.capitalized) averages · recorded samples only" }
         if data.hasCalendarDays { return "Squares show daily summaries · gaps in samples stay empty" }
         if data.statistic == "trend" { return "Recorded readings · gaps show missing coverage" }
         let statistic = SignalFormat.statistic(data.statistic)
@@ -360,7 +392,7 @@ private struct SignalSeriesChart: View {
                             .accessibilityValue(SignalFormat.value(0, unit: unit))
                     }
                 }
-                if bucket.point.minimum != bucket.point.maximum, (bucket.origin?.statistic ?? data.statistic) != "sample" {
+                if data.presentation == .readings, bucket.point.minimum != bucket.point.maximum, (bucket.origin?.statistic ?? data.statistic) != "sample" {
                     if !data.calendar, data.kind == .trend, bucket.start != bucket.end {
                         RectangleMark(xStart: .value("Period start", bucket.start), xEnd: .value("Period end", bucket.end), yStart: .value("Minimum", bucket.point.minimum), yEnd: .value("Maximum", bucket.point.maximum))
                             .foregroundStyle(tint.opacity(0.14)).accessibilityHidden(true)
